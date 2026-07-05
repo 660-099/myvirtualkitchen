@@ -22,24 +22,46 @@ import {
   Save,
   Undo
 } from 'lucide-react';
+import { DESIGN_THEME } from '../theme';
 
 interface MealPlanSectionProps {
   ingredients: Ingredient[];
   mealPlans: MealPlan;
   cookingIdeas: CookingIdea[];
   onUpdateMealPlan: (dateStr: string, mealTime: MealTime, cards: MealCard[]) => void;
+  onMoveMealCard?: (
+    sourceDate: string,
+    sourceTime: MealTime,
+    targetDate: string,
+    targetTime: MealTime,
+    card: MealCard
+  ) => void;
   onAddCookingIdea: (text: string, ingredients: string[]) => void;
   onDeleteCookingIdea: (id: string) => void;
   onAutoAddShoppingItems: (items: string[]) => void;
+  onAddIdeaToMealPlan?: (
+    ideaId: string,
+    text: string,
+    ideaIngs: string[],
+    targetDate: string,
+    targetTime: MealTime
+  ) => void;
+  onMoveMealCardToIdeas?: (
+    sourceDate: string,
+    sourceTime: MealTime,
+    cardId: string,
+    cardTitle: string,
+    cardIngredients: string[]
+  ) => void;
   isWeekView?: boolean;
 }
 
 const MEAL_TIMES: MealTime[] = ['breakfast', 'lunch', 'dinner', 'snack'];
 const MEAL_LABELS: { [key in MealTime]: string } = {
-  breakfast: '아침 🍳',
-  lunch: '점심 🍱',
-  dinner: '저녁 🥩',
-  snack: '간식 🍪',
+  breakfast: '아침',
+  lunch: '점심',
+  dinner: '저녁',
+  snack: '간식',
 };
 
 export default function MealPlanSection({
@@ -47,9 +69,12 @@ export default function MealPlanSection({
   mealPlans,
   cookingIdeas,
   onUpdateMealPlan,
+  onMoveMealCard,
   onAddCookingIdea,
   onDeleteCookingIdea,
   onAutoAddShoppingItems,
+  onAddIdeaToMealPlan,
+  onMoveMealCardToIdeas,
   isWeekView = false,
 }: MealPlanSectionProps) {
   // 기준 날짜 상태 (주간 이동용)
@@ -75,6 +100,9 @@ export default function MealPlanSection({
   const [newIdeaCustomIng, setNewIdeaCustomIng] = useState('');
   const [showAddIdeaForm, setShowAddIdeaForm] = useState(false);
 
+  // 대시보드 도우미용 토글 탭 상태 (ideas: 요리 아이디어, recipes: 레시피 검색)
+  const [activeHelperTab, setActiveHelperTab] = useState<'ideas' | 'recipes'>('ideas');
+
   // 레시피 다중 검색 칩스 상태 (식단 탭 내 상시 우측 컬럼 연동)
   const [selectedRecipeTags, setSelectedRecipeTags] = useState<string[]>([]);
   const [recipeSearchQuery, setRecipeSearchQuery] = useState('');
@@ -97,7 +125,13 @@ export default function MealPlanSection({
     ingredients: string[];
   } | null>(null);
 
+  const [isDragOverIdeas, setIsDragOverIdeas] = useState(false);
+
   const [dragOverTarget, setDragOverTarget] = useState<{ dateStr: string; mealTime: MealTime } | null>(null);
+
+  // 2단계 삭제 클릭 확인 상태
+  const [confirmDeleteCardId, setConfirmDeleteCardId] = useState<string | null>(null);
+  const [confirmDeleteIdeaId, setConfirmDeleteIdeaId] = useState<string | null>(null);
 
   // 화면에 표시될 일자 목록 생성
   const displayedDates: Date[] = [];
@@ -225,14 +259,33 @@ export default function MealPlanSection({
   };
 
   const deleteCard = (dateStr: string, mealTime: MealTime, cardId: string) => {
-    if (confirm('이 요리 카드를 식단표에서 삭제할까요?')) {
-      const currentCards = mealPlans[dateStr]?.[mealTime] || [];
-      const filtered = currentCards.filter(c => c.id !== cardId);
-      onUpdateMealPlan(dateStr, mealTime, filtered);
-      if (editingCardId === cardId) {
-        setEditingCardId(null);
-      }
+    if (confirmDeleteCardId !== cardId) {
+      setConfirmDeleteCardId(cardId);
+      setTimeout(() => {
+        setConfirmDeleteCardId(prev => prev === cardId ? null : prev);
+      }, 3000);
+      return;
     }
+
+    const currentCards = mealPlans[dateStr]?.[mealTime] || [];
+    const filtered = currentCards.filter(c => c.id !== cardId);
+    onUpdateMealPlan(dateStr, mealTime, filtered);
+    if (editingCardId === cardId) {
+      setEditingCardId(null);
+    }
+    setConfirmDeleteCardId(null);
+  };
+
+  const handleDeleteIdeaClick = (id: string) => {
+    if (confirmDeleteIdeaId !== id) {
+      setConfirmDeleteIdeaId(id);
+      setTimeout(() => {
+        setConfirmDeleteIdeaId(prev => prev === id ? null : prev);
+      }, 3000);
+      return;
+    }
+    onDeleteCookingIdea(id);
+    setConfirmDeleteIdeaId(null);
   };
 
   // 재료 칩 헬퍼
@@ -284,14 +337,17 @@ export default function MealPlanSection({
         return;
       }
 
-      // 원래 슬롯에서 제거
-      const sourceList = mealPlans[sourceDate]?.[sourceTime] || [];
-      const filteredSource = sourceList.filter(c => c.id !== card.id);
-      onUpdateMealPlan(sourceDate, sourceTime, filteredSource);
+      // 원래 슬롯에서 제거 & 대상 슬롯에 추가 (onMoveMealCard 트랜잭션 사용)
+      if (onMoveMealCard) {
+        onMoveMealCard(sourceDate, sourceTime, dateStr, mealTime, card);
+      } else {
+        const sourceList = mealPlans[sourceDate]?.[sourceTime] || [];
+        const filteredSource = sourceList.filter(c => c.id !== card.id);
+        onUpdateMealPlan(sourceDate, sourceTime, filteredSource);
 
-      // 대상 슬롯에 추가
-      const targetList = mealPlans[dateStr]?.[mealTime] || [];
-      onUpdateMealPlan(dateStr, mealTime, [...targetList, card]);
+        const targetList = mealPlans[dateStr]?.[mealTime] || [];
+        onUpdateMealPlan(dateStr, mealTime, [...targetList, card]);
+      }
 
       setDraggedCardData(null);
       return;
@@ -300,18 +356,21 @@ export default function MealPlanSection({
     // 2. 요리 아이디어를 드롭해서 새 식단 카드로 장착
     if (draggedIdeaData) {
       const { id, text, ingredients: ideaIngs } = draggedIdeaData;
-      const targetList = mealPlans[dateStr]?.[mealTime] || [];
       
-      const newCard: MealCard = {
-        id: `meal-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        title: text,
-        ingredients: ideaIngs,
-        memo: '',
-        recipeUrl: '',
-      };
-
-      onUpdateMealPlan(dateStr, mealTime, [...targetList, newCard]);
-      onDeleteCookingIdea(id); // 보관소에서 식단으로 배치했으므로 기존 아이디어는 소진 처리
+      if (onAddIdeaToMealPlan) {
+        onAddIdeaToMealPlan(id, text, ideaIngs, dateStr, mealTime);
+      } else {
+        const targetList = mealPlans[dateStr]?.[mealTime] || [];
+        const newCard: MealCard = {
+          id: `meal-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          title: text,
+          ingredients: ideaIngs,
+          memo: '',
+          recipeUrl: '',
+        };
+        onUpdateMealPlan(dateStr, mealTime, [...targetList, newCard]);
+        onDeleteCookingIdea(id); // 보관소에서 식단으로 배치했으므로 기존 아이디어는 소진 처리
+      }
 
       // 스캔 재료 자동 장보기 매칭 연동
       const missing = ideaIngs.filter(ing => !checkIngredientInFridge(ing, ingredients));
@@ -335,6 +394,34 @@ export default function MealPlanSection({
         recipeUrl: '',
       };
       onUpdateMealPlan(dateStr, mealTime, [...targetList, newCard]);
+    }
+  };
+
+  const handleDragOverIdeasZone = (e: React.DragEvent) => {
+    if (draggedCardData) {
+      e.preventDefault();
+      setIsDragOverIdeas(true);
+    }
+  };
+
+  const handleDragLeaveIdeasZone = () => {
+    setIsDragOverIdeas(false);
+  };
+
+  const handleDropOnIdeasZone = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOverIdeas(false);
+
+    if (draggedCardData) {
+      const { sourceDate, sourceTime, card } = draggedCardData;
+      if (onMoveMealCardToIdeas) {
+        onMoveMealCardToIdeas(sourceDate, sourceTime, card.id, card.title, card.ingredients || []);
+      } else {
+        onAddCookingIdea(card.title, card.ingredients || []);
+        const sourceList = mealPlans[sourceDate]?.[sourceTime] || [];
+        onUpdateMealPlan(sourceDate, sourceTime, sourceList.filter(c => c.id !== card.id));
+      }
+      setDraggedCardData(null);
     }
   };
 
@@ -398,13 +485,13 @@ export default function MealPlanSection({
   return (
     <div className="space-y-6">
       {/* 📅 주간 및 대시보드 캘린더 메인 보드 */}
-      <div className="bg-white/40 border border-[#E0DBCF] rounded-2xl p-5 shadow-sm text-[#4A4A4A]">
+      <div className={`bg-white/40 border ${DESIGN_THEME.colors.neutral.border} ${DESIGN_THEME.layout.roundedLarge} p-5 shadow-2xs text-[#4A4A4A]`}>
         
         {/* 상단 캘린더 조작 바 */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-dashed border-[#E0DBCF] pb-4 mb-4">
+        <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-dashed ${DESIGN_THEME.colors.neutral.border} pb-4 mb-4`}>
           <div className="flex items-center gap-2">
-            <CalendarDays className="text-[#829379]" size={20} />
-            <h3 className="font-serif font-bold text-base md:text-lg text-[#5D6D54]">
+            <CalendarDays className={DESIGN_THEME.colors.primary.accent} size={DESIGN_THEME.icons.sizes.lg} />
+            <h3 className={`${DESIGN_THEME.fonts.sans} font-bold ${DESIGN_THEME.fontSizes.titleMedium} ${DESIGN_THEME.colors.primary.text}`}>
               식단 계획표
             </h3>
           </div>
@@ -416,10 +503,10 @@ export default function MealPlanSection({
                 setCalendarViewDate(new Date(referenceDate));
                 setShowCalendarPopover(!showCalendarPopover);
               }}
-              className="p-2 hover:bg-[#F9F7F2] rounded-xl border border-[#E0DBCF] text-[#4A4A4A] transition-colors flex items-center justify-center gap-1.5 bg-white text-xs font-bold"
+              className={`${DESIGN_THEME.buttons.secondary} p-2 text-xs`}
               title="캘린더 전체 날짜 범위 탐색"
             >
-              <Calendar size={14} className="text-[#829379]" />
+              <Calendar size={DESIGN_THEME.icons.sizes.md} className={DESIGN_THEME.colors.primary.accent} />
               <span>날짜 이동</span>
             </button>
 
@@ -515,23 +602,23 @@ export default function MealPlanSection({
 
             <button
               onClick={handlePrevDay}
-              className="p-2 hover:bg-[#F9F7F2] rounded-xl border border-[#E0DBCF] text-[#4A4A4A] transition-colors bg-white"
+              className={`${DESIGN_THEME.buttons.secondary} p-2`}
               title="이전 날짜 이동"
             >
-              <ChevronLeft size={14} />
+              <ChevronLeft size={DESIGN_THEME.icons.sizes.md} />
             </button>
             <button
               onClick={handleToday}
-              className="px-3 py-1.5 hover:bg-[#F9F7F2] rounded-xl border border-[#E0DBCF] text-xs font-bold text-[#4A4A4A] transition-colors bg-white"
+              className={`${DESIGN_THEME.buttons.secondary} px-3 py-1.5 text-xs`}
             >
               Today
             </button>
             <button
               onClick={handleNextDay}
-              className="p-2 hover:bg-[#F9F7F2] rounded-xl border border-[#E0DBCF] text-[#4A4A4A] transition-colors bg-white"
+              className={`${DESIGN_THEME.buttons.secondary} p-2`}
               title="다음 날짜 이동"
             >
-              <ChevronRight size={14} />
+              <ChevronRight size={DESIGN_THEME.icons.sizes.md} />
             </button>
           </div>
         </div>
@@ -562,7 +649,7 @@ export default function MealPlanSection({
             return (
               <div
                 key={dateStr}
-                className={`rounded-xl border p-4 flex flex-col min-h-[350px] transition-all ${
+                className={`rounded-xl border p-4 flex flex-col transition-all ${
                   isToday
                     ? 'border-[#829379] bg-white/90 ring-4 ring-[#829379]/10 shadow-md'
                     : 'border-[#E0DBCF] bg-white/40'
@@ -576,7 +663,7 @@ export default function MealPlanSection({
                 </div>
 
                 {/* 4대 끼니 리스트 */}
-                <div className="flex-1 flex flex-col gap-3.5">
+                <div className="flex-1 flex flex-col gap-1.5">
                   {MEAL_TIMES.map(mealTime => {
                     const cards: MealCard[] = dayPlan[mealTime] || [];
                     const isDragOver = dragOverTarget?.dateStr === dateStr && dragOverTarget?.mealTime === mealTime;
@@ -587,10 +674,10 @@ export default function MealPlanSection({
                         onDragOver={e => handleDragOverZone(e, dateStr, mealTime)}
                         onDragLeave={handleDragLeaveZone}
                         onDrop={e => handleDropOnZone(e, dateStr, mealTime)}
-                        className={`rounded-xl p-2 border border-dashed transition-all relative ${
+                        className={`py-1.5 transition-all relative border-b border-[#E0DBCF]/30 last:border-b-0 ${
                           isDragOver 
-                            ? 'border-[#829379] bg-[#829379]/10' 
-                            : 'border-[#E0DBCF]/50 bg-white/10 hover:bg-white/35'
+                            ? 'bg-[#829379]/10 rounded-lg px-2' 
+                            : ''
                         }`}
                       >
                         {/* 끼니 타이틀 헤더 */}
@@ -643,13 +730,8 @@ export default function MealPlanSection({
                         )}
 
                         {/* 배치된 요리 카드들 */}
-                        <div className="space-y-1.5 min-h-[40px]">
-                          {cards.length === 0 ? (
-                            <div className="text-[10px] text-gray-300 italic py-3 text-center">
-                              식단 비어있음
-                            </div>
-                          ) : (
-                            cards.map(card => {
+                        <div className="space-y-1.5 min-h-0">
+                          {cards.map(card => {
                               const isEditing = editingCardId === card.id;
 
                               return (
@@ -769,9 +851,13 @@ export default function MealPlanSection({
                                         <button
                                           type="button"
                                           onClick={() => deleteCard(dateStr, mealTime, card.id)}
-                                          className="text-[#9E7676] hover:underline"
+                                          className={`px-1.5 py-0.5 rounded transition-all duration-200 ${
+                                            confirmDeleteCardId === card.id
+                                              ? 'bg-red-500 text-white animate-pulse font-bold'
+                                              : 'text-[#9E7676] hover:bg-red-50 hover:underline'
+                                          }`}
                                         >
-                                          삭제
+                                          {confirmDeleteCardId === card.id ? '진짜 삭제? (한번 더!)' : '삭제'}
                                         </button>
                                         <div className="flex gap-1.5">
                                           <button
@@ -853,8 +939,7 @@ export default function MealPlanSection({
                                   )}
                                 </div>
                               );
-                            })
-                          )}
+                            })}
                         </div>
                       </div>
                     );
@@ -866,317 +951,687 @@ export default function MealPlanSection({
         </div>
       </div>
 
-      {/* 💡 요리 영감 & 검색 4-column bento block (탭 대신 동시 배치) */}
-      <div className="bg-white/40 border border-[#E0DBCF] rounded-2xl p-5 shadow-sm text-[#4A4A4A] space-y-4">
-        <h3 className="font-serif font-bold text-sm md:text-base text-[#5D6D54] border-b border-[#E0DBCF]/60 pb-2 flex items-center gap-2">
-          <Sparkles size={16} className="text-[#9E7676]" />
-          <span>식단 짜기 도우미 & 영감 상자</span>
-        </h3>
+      {/* 💡 요리 영감 & 검색 4-column bento block */}
+      <div className={`bg-white/40 border ${DESIGN_THEME.colors.neutral.border} ${DESIGN_THEME.layout.roundedLarge} p-5 shadow-2xs text-[#4A4A4A] space-y-4`}>
+        {/* 상단 타이틀 및 탭 제어 */}
+        <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b ${DESIGN_THEME.colors.neutral.borderLight} pb-3`}>
+          <h3 className={`${DESIGN_THEME.fonts.sans} font-bold ${DESIGN_THEME.fontSizes.titleMedium} ${DESIGN_THEME.colors.primary.text} flex items-center gap-2`}>
+            <Sparkles size={DESIGN_THEME.icons.sizes.md} className={DESIGN_THEME.colors.danger.text} />
+            <span>식단 도우미</span>
+          </h3>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* 👈 좌측 3컬럼: 요리 아이디어 리스트 */}
-          <div className="lg:col-span-3 space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-[#5D6D54] flex items-center gap-1.5">
-                <span>💡</span> 요리 아이디어 보관소 ({cookingIdeas.length})
-              </span>
-              
-              {!showAddIdeaForm ? (
-                <button
-                  onClick={() => setShowAddIdeaForm(true)}
-                  className="bg-white border border-[#E0DBCF] hover:bg-[#829379]/5 rounded-xl py-1.5 px-3 text-[11px] font-bold text-[#829379] flex items-center gap-1 transition-all shadow-2xs"
-                >
-                  <Plus size={11} />
-                  <span>새 아이디어 등록</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => setShowAddIdeaForm(false)}
-                  className="text-xs text-gray-400 hover:text-gray-600 font-bold"
-                >
-                  등록 닫기 ×
-                </button>
-              )}
+          {/* 대시보드인 경우에만 탭 버튼 제공 */}
+          {!isWeekView && (
+            <div className={`flex bg-[#F9F7F2] border ${DESIGN_THEME.colors.neutral.borderLight} p-0.5 rounded-lg shrink-0 self-start sm:self-auto`}>
+              <button
+                type="button"
+                onClick={() => setActiveHelperTab('ideas')}
+                className={`px-3 py-1.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                  activeHelperTab === 'ideas'
+                    ? `${DESIGN_THEME.colors.primary.accentBg} text-white shadow-2xs`
+                    : 'text-gray-500 hover:text-[#5D6D54]'
+                }`}
+              >
+                요리 아이디어 ({cookingIdeas.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveHelperTab('recipes')}
+                className={`px-3 py-1.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                  activeHelperTab === 'recipes'
+                    ? `${DESIGN_THEME.colors.primary.accentBg} text-white shadow-2xs`
+                    : 'text-gray-500 hover:text-[#5D6D54]'
+                }`}
+              >
+                레시피 검색 ({selectedRecipeTags.length})
+              </button>
             </div>
+          )}
+        </div>
 
-            {/* 새 요리 아이디어 등록 창 */}
-            {showAddIdeaForm && (
-              <div className="bg-white/80 border border-[#829379]/30 rounded-2xl p-4 space-y-3 text-xs relative">
-                <p className="font-bold text-xs text-[#5D6D54] flex items-center gap-1">✨ 새로운 요리 아이디어 추가</p>
+        {isWeekView ? (
+          // [식단] 페이지: 기존 4컬럼 Bento Grid (양옆 동시에 노출)
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* 좌측 3컬럼: 요리 아이디어 리스트 */}
+            <div
+              onDragOver={handleDragOverIdeasZone}
+              onDragLeave={handleDragLeaveIdeasZone}
+              onDrop={handleDropOnIdeasZone}
+              className={`lg:col-span-3 space-y-4 transition-all duration-200 p-2 rounded-2xl border-2 ${
+                isDragOverIdeas
+                  ? 'border-dashed border-[#829379] bg-[#829379]/5'
+                  : 'border-transparent'
+              }`}
+            >
+              {/* 요리 아이디어 상단 */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-[#5D6D54] flex items-center gap-1.5">
+                  <span>💡</span> 요리 아이디어 ({cookingIdeas.length})
+                </span>
                 
-                <input
-                  type="text"
-                  value={newIdeaText}
-                  onChange={e => setNewIdeaText(e.target.value)}
-                  placeholder="요리 아이디어 명칭 (예: 백종원 김치찌개 요리하기)"
-                  className="w-full bg-[#F9F7F2] border border-[#E0DBCF] rounded-lg px-2.5 py-1.5 text-xs text-[#4A4A4A] focus:outline-hidden focus:ring-1 focus:ring-[#829379]"
-                />
+                {!showAddIdeaForm ? (
+                  <button
+                    onClick={() => setShowAddIdeaForm(true)}
+                    className="bg-white border border-[#E0DBCF] hover:bg-[#829379]/5 rounded-xl py-1.5 px-3 text-[11px] font-bold text-[#829379] flex items-center gap-1 transition-all shadow-2xs"
+                  >
+                    <Plus size={11} />
+                    <span>새 아이디어 등록</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setShowAddIdeaForm(false)}
+                    className="text-xs text-gray-400 hover:text-gray-600 font-bold"
+                  >
+                    등록 닫기 ×
+                  </button>
+                )}
+              </div>
 
-                {/* 임시 등록 재료 칩 */}
-                {newIdeaIngredients.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {newIdeaIngredients.map((ing, idx) => (
-                      <span
-                        key={idx}
-                        className="bg-[#DDE5D7] text-[#5D6D54] border border-[#C9D5C3] text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1"
-                      >
-                        <span>{ing}</span>
+              {/* 새 요리 아이디어 등록 창 */}
+              {showAddIdeaForm && (
+                <div className="bg-white/80 border border-[#829379]/30 rounded-2xl p-4 space-y-3 text-xs relative">
+                  <p className="font-bold text-xs text-[#5D6D54] flex items-center gap-1">✨ 새로운 요리 아이디어 추가</p>
+                  
+                  <input
+                    type="text"
+                    value={newIdeaText}
+                    onChange={e => setNewIdeaText(e.target.value)}
+                    placeholder="요리 아이디어 명칭 (예: 백종원 김치찌개 요리하기)"
+                    className="w-full bg-[#F9F7F2] border border-[#E0DBCF] rounded-lg px-2.5 py-1.5 text-xs text-[#4A4A4A] focus:outline-hidden focus:ring-1 focus:ring-[#829379]"
+                  />
+
+                  {/* 임시 등록 재료 칩 */}
+                  {newIdeaIngredients.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {newIdeaIngredients.map((ing, idx) => (
+                        <span
+                          key={idx}
+                          className="bg-[#DDE5D7] text-[#5D6D54] border border-[#C9D5C3] text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1"
+                        >
+                          <span>{ing}</span>
+                          <button
+                            type="button"
+                            onClick={() => setNewIdeaIngredients(prev => prev.filter((_, i) => i !== idx))}
+                            className="hover:text-red-500 font-bold"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 재료 칩 등록 */}
+                  <div className="space-y-1">
+                    <input
+                      type="text"
+                      value={newIdeaCustomIng}
+                      onChange={e => setNewIdeaCustomIng(e.target.value)}
+                      placeholder="식재료 이름을 치고 엔터"
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const val = newIdeaCustomIng.trim();
+                          if (val && !newIdeaIngredients.includes(val)) {
+                            setNewIdeaIngredients(prev => [...prev, val]);
+                            setNewIdeaCustomIng('');
+                          }
+                        }
+                      }}
+                      className="w-full bg-[#F9F7F2] border border-[#E0DBCF] rounded-lg px-2.5 py-1 text-[11px] focus:outline-hidden focus:ring-1 focus:ring-[#829379]"
+                    />
+
+                    {ingredients.length > 0 && (
+                      <div className="max-h-24 overflow-y-auto bg-white border border-[#E0DBCF] rounded-lg p-1.5 space-y-0.5 text-[10px]">
+                        <p className="text-[9px] text-gray-400 font-bold px-1 mb-1">냉장고 보관 식재료 퀵 추가:</p>
+                        {ingredients.map(ing => {
+                          const active = newIdeaIngredients.includes(ing.name);
+                          return (
+                            <button
+                              key={ing.id}
+                              type="button"
+                              onClick={() => {
+                                if (active) {
+                                  setNewIdeaIngredients(prev => prev.filter(name => name !== ing.name));
+                                } else {
+                                  setNewIdeaIngredients(prev => [...prev, ing.name]);
+                                }
+                              }}
+                              className={`w-full text-left p-1 rounded flex items-center justify-between ${
+                                active ? 'bg-[#DDE5D7]/50 text-[#5D6D54] font-bold' : 'hover:bg-gray-50 text-gray-600'
+                              }`}
+                            >
+                              <span>{ing.emoji} {ing.name}</span>
+                              {active && <Check size={8} />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-1.5 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewIdeaText('');
+                        setNewIdeaIngredients([]);
+                        setNewIdeaCustomIng('');
+                      }}
+                      className="text-[10px] font-bold text-gray-400 bg-gray-50 hover:bg-gray-100 px-3 py-1 rounded-lg"
+                    >
+                      초기화
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!newIdeaText.trim()) return;
+                        onAddCookingIdea(newIdeaText.trim(), newIdeaIngredients);
+                        setNewIdeaText('');
+                        setNewIdeaIngredients([]);
+                        setNewIdeaCustomIng('');
+                        setShowAddIdeaForm(false);
+                      }}
+                      className="text-[10px] font-bold text-white bg-[#829379] hover:bg-[#6D7D65] px-4 py-1 rounded-lg shadow-sm"
+                    >
+                      아이디어 등록
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* 아이디어 목록 카드 그리드 */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {cookingIdeas.length === 0 ? (
+                  <div className="col-span-full text-center py-10 text-gray-400 text-xs border border-dashed border-[#E0DBCF] rounded-2xl bg-white/30">
+                    아직 등록된 요리 아이디어가 없습니다. 위 버튼을 눌러 새 레시피 구상을 등록해 보세요!
+                  </div>
+                ) : (
+                  cookingIdeas.map(idea => (
+                    <div
+                      key={idea.id}
+                      draggable
+                      onDragStart={e => handleIdeaDragStart(e, idea)}
+                      className="bg-white/90 border border-[#E0DBCF] rounded-xl p-3.5 shadow-2xs hover:shadow-sm cursor-grab active:cursor-grabbing transition-all relative flex flex-col justify-between min-h-[105px] gap-2.5"
+                      title="식단 요일/끼니 격자로 드래그해서 배치하세요 🚀"
+                    >
+                      <div className="flex justify-between items-start gap-1.5">
+                        <p className="text-xs font-bold text-[#4A4A4A] leading-relaxed break-words flex-1">
+                          💡 {idea.text}
+                        </p>
                         <button
                           type="button"
-                          onClick={() => setNewIdeaIngredients(prev => prev.filter((_, i) => i !== idx))}
-                          className="hover:text-red-500 font-bold"
+                          onClick={() => handleDeleteIdeaClick(idea.id)}
+                          className={`p-1 rounded-lg transition-all duration-200 shrink-0 flex items-center gap-1 ${
+                            confirmDeleteIdeaId === idea.id
+                              ? 'bg-red-500 text-white animate-pulse px-2.5 py-0.5 text-[10px] font-bold'
+                              : 'text-[#9E7676] hover:bg-[#F2E1E1]'
+                          }`}
+                          title={confirmDeleteIdeaId === idea.id ? '진짜 삭제? (한번 더 클릭)' : '아이디어 폐기'}
                         >
-                          ×
+                          <Trash2 size={11} />
+                          {confirmDeleteIdeaId === idea.id && <span>삭제</span>}
+                        </button>
+                      </div>
+
+                      <div className="flex flex-wrap gap-0.5 items-center mt-auto">
+                        {idea.ingredients && idea.ingredients.length > 0 ? (
+                          idea.ingredients.map((ing, ingIdx) => {
+                            const inFridge = checkIngredientInFridge(ing, ingredients);
+                            return (
+                              <span
+                                key={ingIdx}
+                                className={`text-[8px] font-bold px-1.5 py-0.2 rounded-md ${
+                                  inFridge ? 'bg-[#DDE5D7] text-[#5D6D54]' : 'bg-[#F2E1E1] text-[#9E7676] border border-[#E9C7C7]/40'
+                                }`}
+                              >
+                                {ing}
+                              </span>
+                            );
+                          })
+                        ) : (
+                          <span className="text-[9px] text-gray-300 italic">재료 미등록</span>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* 우측 1컬럼: 레시피 검색 창 */}
+            <div className="lg:col-span-1 border-t lg:border-t-0 lg:border-l border-dashed border-[#E0DBCF] lg:pl-6 pt-4 lg:pt-0 space-y-3.5 recipe-search-container">
+              <span className="text-xs font-bold text-[#5D6D54] flex items-center gap-1.5">
+                <span>🔍</span> 퀵 레시피 구글 검색
+              </span>
+
+              <div className="space-y-3 text-xs">
+                <div className="relative">
+                  <div
+                    className="min-h-[42px] w-full bg-white border border-[#E0DBCF] rounded-xl p-1.5 flex flex-wrap gap-1 items-center cursor-text focus-within:ring-1 focus-within:ring-[#829379] transition-all"
+                    onClick={() => setIsRecipeDropdownOpen(true)}
+                  >
+                    {/* 선택 태그들 */}
+                    {selectedRecipeTags.map(tag => (
+                      <span
+                        key={tag}
+                        className="bg-[#DDE5D7] text-[#5D6D54] border border-[#C9D5C3]/60 font-bold text-[10px] pl-2 pr-1 py-0.5 rounded-lg flex items-center gap-0.5"
+                      >
+                        <span>{tag}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleRecipeTag(tag);
+                          }}
+                          className="hover:bg-[#C9D5C3]/80 rounded p-0.5 text-[9px]"
+                        >
+                          <X size={10} />
                         </button>
                       </span>
                     ))}
-                  </div>
-                )}
 
-                {/* 재료 칩 등록 */}
-                <div className="space-y-1">
-                  <input
-                    type="text"
-                    value={newIdeaCustomIng}
-                    onChange={e => setNewIdeaCustomIng(e.target.value)}
-                    placeholder="식재료 이름을 치고 엔터"
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const val = newIdeaCustomIng.trim();
-                        if (val && !newIdeaIngredients.includes(val)) {
-                          setNewIdeaIngredients(prev => [...prev, val]);
-                          setNewIdeaCustomIng('');
+                    {/* 검색어 인풋 */}
+                    <input
+                      type="text"
+                      value={recipeSearchQuery}
+                      onChange={e => {
+                        setRecipeSearchQuery(e.target.value);
+                        setIsRecipeDropdownOpen(true);
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (recipeSearchQuery.trim()) {
+                            const q = recipeSearchQuery.trim();
+                            if (!selectedRecipeTags.includes(q)) {
+                              handleToggleRecipeTag(q);
+                            }
+                            setRecipeSearchQuery('');
+                          }
                         }
-                      }
-                    }}
-                    className="w-full bg-[#F9F7F2] border border-[#E0DBCF] rounded-lg px-2.5 py-1 text-[11px] focus:outline-hidden focus:ring-1 focus:ring-[#829379]"
-                  />
+                      }}
+                      placeholder={selectedRecipeTags.length === 0 ? "재료 명칭 입력..." : ""}
+                      className="flex-1 bg-transparent border-none text-xs text-[#4A4A4A] px-1 focus:outline-hidden min-w-[70px]"
+                    />
+                    <Search size={13} className="text-gray-400 mr-1" />
+                  </div>
 
-                  {ingredients.length > 0 && (
-                    <div className="max-h-24 overflow-y-auto bg-white border border-[#E0DBCF] rounded-lg p-1.5 space-y-0.5 text-[10px]">
-                      <p className="text-[9px] text-gray-400 font-bold px-1 mb-1">냉장고 보관 식재료 퀵 추가:</p>
-                      {ingredients.map(ing => {
-                        const active = newIdeaIngredients.includes(ing.name);
-                        return (
-                          <button
-                            key={ing.id}
-                            type="button"
-                            onClick={() => {
-                              if (active) {
-                                setNewIdeaIngredients(prev => prev.filter(name => name !== ing.name));
-                              } else {
-                                setNewIdeaIngredients(prev => [...prev, ing.name]);
-                              }
-                            }}
-                            className={`w-full text-left p-1 rounded flex items-center justify-between ${
-                              active ? 'bg-[#DDE5D7]/50 text-[#5D6D54] font-bold' : 'hover:bg-gray-50 text-gray-600'
-                            }`}
-                          >
-                            <span>{ing.emoji} {ing.name}</span>
-                            {active && <Check size={8} />}
-                          </button>
-                        );
-                      })}
+                  {/* 자동매칭 드롭다운 */}
+                  {isRecipeDropdownOpen && (
+                    <div className="absolute left-0 right-0 mt-1 z-30 max-h-48 overflow-y-auto bg-white border border-[#E0DBCF] rounded-xl shadow-xl p-2 space-y-1">
+                      <div className="flex justify-between items-center px-1 pb-1 border-b border-[#E0DBCF]/60 mb-1">
+                        <span className="text-[9px] text-gray-400 font-bold">냉장고 보관 재료</span>
+                        <button
+                          type="button"
+                          onClick={() => setIsRecipeDropdownOpen(false)}
+                          className="text-[9px] text-gray-400 hover:text-gray-600 font-bold"
+                        >
+                          닫기
+                        </button>
+                      </div>
+
+                      {filteredMaterials.length === 0 ? (
+                        <p className="text-[10px] text-gray-400 py-3 text-center">
+                          {recipeSearchQuery ? "매칭되는 재료 없음" : "냉장고에 재료가 없어요!"}
+                        </p>
+                      ) : (
+                        filteredMaterials.map(mat => {
+                          const isSelected = selectedRecipeTags.includes(mat);
+                          return (
+                            <button
+                              key={mat}
+                              type="button"
+                              onClick={() => handleToggleRecipeTag(mat)}
+                              className="w-full text-left text-xs px-2 py-1.5 rounded-lg transition-colors flex items-center justify-between hover:bg-[#F9F7F2] text-gray-600"
+                            >
+                              <span>{mat}</span>
+                              {isSelected && <span className="text-[10px] text-[#5D6D54] font-bold">✓</span>}
+                            </button>
+                          );
+                        })
+                      )}
                     </div>
                   )}
                 </div>
 
-                <div className="flex gap-1.5 justify-end">
+                {/* 검색 실행 버튼 */}
+                <button
+                  type="button"
+                  onClick={handleGoogleRecipeSearch}
+                  className="w-full bg-[#9E7676] hover:bg-[#835A5A] text-white font-bold py-2.5 rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <span>🔍 구글 레시피 검색 ({selectedRecipeTags.length})</span>
+                </button>
+                
+                <p className="text-[9px] text-gray-400 leading-normal text-center italic">
+                  냉장고 속 재료 칩들을 조합해서 바로 구글 레시피 창을 띄울 수 있는 간편 검색창입니다.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          // [대시보드] 페이지 (isWeekView === false): 버튼을 눌러 탭을 오가는 형식
+          <div className="max-w-4xl mx-auto">
+            {activeHelperTab === 'ideas' ? (
+              <div
+                onDragOver={handleDragOverIdeasZone}
+                onDragLeave={handleDragLeaveIdeasZone}
+                onDrop={handleDropOnIdeasZone}
+                className={`space-y-4 transition-all duration-200 p-2 rounded-2xl border-2 ${
+                  isDragOverIdeas
+                    ? 'border-dashed border-[#829379] bg-[#829379]/5'
+                    : 'border-transparent'
+                }`}
+              >
+                {/* 요리 아이디어 상단 */}
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#5D6D54] flex items-center gap-1.5">
+                    <span>💡</span> 요리 아이디어 ({cookingIdeas.length})
+                  </span>
+                  
+                  {!showAddIdeaForm ? (
+                    <button
+                      onClick={() => setShowAddIdeaForm(true)}
+                      className="bg-white border border-[#E0DBCF] hover:bg-[#829379]/5 rounded-xl py-1.5 px-3 text-[11px] font-bold text-[#829379] flex items-center gap-1 transition-all shadow-2xs"
+                    >
+                      <Plus size={11} />
+                      <span>새 아이디어 등록</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setShowAddIdeaForm(false)}
+                      className="text-xs text-gray-400 hover:text-gray-600 font-bold"
+                    >
+                      등록 닫기 ×
+                    </button>
+                  )}
+                </div>
+
+                {/* 새 요리 아이디어 등록 창 */}
+                {showAddIdeaForm && (
+                  <div className="bg-white/80 border border-[#829379]/30 rounded-2xl p-4 space-y-3 text-xs relative">
+                    <p className="font-bold text-xs text-[#5D6D54] flex items-center gap-1">✨ 새로운 요리 아이디어 추가</p>
+                    
+                    <input
+                      type="text"
+                      value={newIdeaText}
+                      onChange={e => setNewIdeaText(e.target.value)}
+                      placeholder="요리 아이디어 명칭 (예: 백종원 김치찌개 요리하기)"
+                      className="w-full bg-[#F9F7F2] border border-[#E0DBCF] rounded-lg px-2.5 py-1.5 text-xs text-[#4A4A4A] focus:outline-hidden focus:ring-1 focus:ring-[#829379]"
+                    />
+
+                    {/* 임시 등록 재료 칩 */}
+                    {newIdeaIngredients.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {newIdeaIngredients.map((ing, idx) => (
+                          <span
+                            key={idx}
+                            className="bg-[#DDE5D7] text-[#5D6D54] border border-[#C9D5C3] text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1"
+                          >
+                            <span>{ing}</span>
+                            <button
+                              type="button"
+                              onClick={() => setNewIdeaIngredients(prev => prev.filter((_, i) => i !== idx))}
+                              className="hover:text-red-500 font-bold"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 재료 칩 등록 */}
+                    <div className="space-y-1">
+                      <input
+                        type="text"
+                        value={newIdeaCustomIng}
+                        onChange={e => setNewIdeaCustomIng(e.target.value)}
+                        placeholder="식재료 이름을 치고 엔터"
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const val = newIdeaCustomIng.trim();
+                            if (val && !newIdeaIngredients.includes(val)) {
+                              setNewIdeaIngredients(prev => [...prev, val]);
+                              setNewIdeaCustomIng('');
+                            }
+                          }
+                        }}
+                        className="w-full bg-[#F9F7F2] border border-[#E0DBCF] rounded-lg px-2.5 py-1 text-[11px] focus:outline-hidden focus:ring-1 focus:ring-[#829379]"
+                      />
+
+                      {ingredients.length > 0 && (
+                        <div className="max-h-24 overflow-y-auto bg-white border border-[#E0DBCF] rounded-lg p-1.5 space-y-0.5 text-[10px]">
+                          <p className="text-[9px] text-gray-400 font-bold px-1 mb-1">냉장고 보관 식재료 퀵 추가:</p>
+                          {ingredients.map(ing => {
+                            const active = newIdeaIngredients.includes(ing.name);
+                            return (
+                              <button
+                                key={ing.id}
+                                type="button"
+                                onClick={() => {
+                                  if (active) {
+                                    setNewIdeaIngredients(prev => prev.filter(name => name !== ing.name));
+                                  } else {
+                                    setNewIdeaIngredients(prev => [...prev, ing.name]);
+                                  }
+                                }}
+                                className={`w-full text-left p-1 rounded flex items-center justify-between ${
+                                  active ? 'bg-[#DDE5D7]/50 text-[#5D6D54] font-bold' : 'hover:bg-gray-50 text-gray-600'
+                                }`}
+                              >
+                                <span>{ing.emoji} {ing.name}</span>
+                                {active && <Check size={8} />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex gap-1.5 justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewIdeaText('');
+                          setNewIdeaIngredients([]);
+                          setNewIdeaCustomIng('');
+                        }}
+                        className="text-[10px] font-bold text-gray-400 bg-gray-50 hover:bg-gray-100 px-3 py-1 rounded-lg"
+                      >
+                        초기화
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!newIdeaText.trim()) return;
+                          onAddCookingIdea(newIdeaText.trim(), newIdeaIngredients);
+                          setNewIdeaText('');
+                          setNewIdeaIngredients([]);
+                          setNewIdeaCustomIng('');
+                          setShowAddIdeaForm(false);
+                        }}
+                        className="text-[10px] font-bold text-white bg-[#829379] hover:bg-[#6D7D65] px-4 py-1 rounded-lg shadow-sm"
+                      >
+                        아이디어 등록
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 아이디어 목록 카드 그리드 */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {cookingIdeas.length === 0 ? (
+                    <div className="col-span-full text-center py-10 text-gray-400 text-xs border border-dashed border-[#E0DBCF] rounded-2xl bg-white/30">
+                      아직 등록된 요리 아이디어가 없습니다. 위 버튼을 눌러 새 레시피 구상을 등록해 보세요!
+                    </div>
+                  ) : (
+                    cookingIdeas.map(idea => (
+                      <div
+                        key={idea.id}
+                        draggable
+                        onDragStart={e => handleIdeaDragStart(e, idea)}
+                        className="bg-white/90 border border-[#E0DBCF] rounded-xl p-3.5 shadow-2xs hover:shadow-sm cursor-grab active:cursor-grabbing transition-all relative flex flex-col justify-between min-h-[105px] gap-2.5"
+                        title="식단 요일/끼니 격자로 드래그해서 배치하세요 🚀"
+                      >
+                        <div className="flex justify-between items-start gap-1.5">
+                          <p className="text-xs font-bold text-[#4A4A4A] leading-relaxed break-words flex-1">
+                            💡 {idea.text}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteIdeaClick(idea.id)}
+                            className={`p-1 rounded-lg transition-all duration-200 shrink-0 flex items-center gap-1 ${
+                              confirmDeleteIdeaId === idea.id
+                                ? 'bg-red-500 text-white animate-pulse px-2.5 py-0.5 text-[10px] font-bold'
+                                : 'text-[#9E7676] hover:bg-[#F2E1E1]'
+                            }`}
+                            title={confirmDeleteIdeaId === idea.id ? '진짜 삭제? (한번 더 클릭)' : '아이디어 폐기'}
+                          >
+                            <Trash2 size={11} />
+                            {confirmDeleteIdeaId === idea.id && <span>삭제</span>}
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-0.5 items-center mt-auto">
+                          {idea.ingredients && idea.ingredients.length > 0 ? (
+                            idea.ingredients.map((ing, ingIdx) => {
+                              const inFridge = checkIngredientInFridge(ing, ingredients);
+                              return (
+                                <span
+                                  key={ingIdx}
+                                  className={`text-[8px] font-bold px-1.5 py-0.2 rounded-md ${
+                                    inFridge ? 'bg-[#DDE5D7] text-[#5D6D54]' : 'bg-[#F2E1E1] text-[#9E7676] border border-[#E9C7C7]/40'
+                                  }`}
+                                >
+                                  {ing}
+                                </span>
+                              );
+                            })
+                          ) : (
+                            <span className="text-[9px] text-gray-300 italic">재료 미등록</span>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="recipe-search-container max-w-lg mx-auto p-5 bg-white border border-[#E0DBCF] rounded-2xl shadow-sm space-y-4">
+                <span className="text-xs font-bold text-[#5D6D54] flex items-center gap-1.5 border-b border-[#E0DBCF]/40 pb-2">
+                  <span>🔍</span> 퀵 레시피 구글 검색
+                </span>
+
+                <div className="space-y-3 text-xs">
+                  <div className="relative">
+                    <div
+                      className="min-h-[42px] w-full bg-white border border-[#E0DBCF] rounded-xl p-1.5 flex flex-wrap gap-1 items-center cursor-text focus-within:ring-1 focus-within:ring-[#829379] transition-all"
+                      onClick={() => setIsRecipeDropdownOpen(true)}
+                    >
+                      {/* 선택 태그들 */}
+                      {selectedRecipeTags.map(tag => (
+                        <span
+                          key={tag}
+                          className="bg-[#DDE5D7] text-[#5D6D54] border border-[#C9D5C3]/60 font-bold text-[10px] pl-2 pr-1 py-0.5 rounded-lg flex items-center gap-0.5"
+                        >
+                          <span>{tag}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleRecipeTag(tag);
+                            }}
+                            className="hover:bg-[#C9D5C3]/80 rounded p-0.5 text-[9px]"
+                          >
+                            <X size={10} />
+                          </button>
+                        </span>
+                      ))}
+
+                      {/* 검색어 인풋 */}
+                      <input
+                        type="text"
+                        value={recipeSearchQuery}
+                        onChange={e => {
+                          setRecipeSearchQuery(e.target.value);
+                          setIsRecipeDropdownOpen(true);
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (recipeSearchQuery.trim()) {
+                              const q = recipeSearchQuery.trim();
+                              if (!selectedRecipeTags.includes(q)) {
+                                handleToggleRecipeTag(q);
+                              }
+                              setRecipeSearchQuery('');
+                            }
+                          }
+                        }}
+                        placeholder={selectedRecipeTags.length === 0 ? "재료 명칭 입력..." : ""}
+                        className="flex-1 bg-transparent border-none text-xs text-[#4A4A4A] px-1 focus:outline-hidden min-w-[70px]"
+                      />
+                      <Search size={13} className="text-gray-400 mr-1" />
+                    </div>
+
+                    {/* 자동매칭 드롭다운 */}
+                    {isRecipeDropdownOpen && (
+                      <div className="absolute left-0 right-0 mt-1 z-30 max-h-48 overflow-y-auto bg-white border border-[#E0DBCF] rounded-xl shadow-xl p-2 space-y-1">
+                        <div className="flex justify-between items-center px-1 pb-1 border-b border-[#E0DBCF]/60 mb-1">
+                          <span className="text-[9px] text-gray-400 font-bold">냉장고 보관 재료</span>
+                          <button
+                            type="button"
+                            onClick={() => setIsRecipeDropdownOpen(false)}
+                            className="text-[9px] text-gray-400 hover:text-gray-600 font-bold"
+                          >
+                            닫기
+                          </button>
+                        </div>
+
+                        {filteredMaterials.length === 0 ? (
+                          <p className="text-[10px] text-gray-400 py-3 text-center">
+                            {recipeSearchQuery ? "매칭되는 재료 없음" : "냉장고에 재료가 없어요!"}
+                          </p>
+                        ) : (
+                          filteredMaterials.map(mat => {
+                            const isSelected = selectedRecipeTags.includes(mat);
+                            return (
+                              <button
+                                key={mat}
+                                type="button"
+                                onClick={() => handleToggleRecipeTag(mat)}
+                                className="w-full text-left text-xs px-2 py-1.5 rounded-lg transition-colors flex items-center justify-between hover:bg-[#F9F7F2] text-gray-600"
+                              >
+                                <span>{mat}</span>
+                                {isSelected && <span className="text-[10px] text-[#5D6D54] font-bold">✓</span>}
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 검색 실행 버튼 */}
                   <button
                     type="button"
-                    onClick={() => {
-                      setNewIdeaText('');
-                      setNewIdeaIngredients([]);
-                      setNewIdeaCustomIng('');
-                    }}
-                    className="text-[10px] font-bold text-gray-400 bg-gray-50 hover:bg-gray-100 px-3 py-1 rounded-lg"
+                    onClick={handleGoogleRecipeSearch}
+                    className="w-full bg-[#9E7676] hover:bg-[#835A5A] text-white font-bold py-2.5 rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5"
                   >
-                    초기화
+                    <span>🔍 구글 레시피 검색 ({selectedRecipeTags.length})</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!newIdeaText.trim()) return;
-                      onAddCookingIdea(newIdeaText.trim(), newIdeaIngredients);
-                      setNewIdeaText('');
-                      setNewIdeaIngredients([]);
-                      setNewIdeaCustomIng('');
-                      setShowAddIdeaForm(false);
-                    }}
-                    className="text-[10px] font-bold text-white bg-[#829379] hover:bg-[#6D7D65] px-4 py-1 rounded-lg shadow-sm"
-                  >
-                    아이디어 등록
-                  </button>
+                  
+                  <p className="text-[9px] text-gray-400 leading-normal text-center italic mt-2">
+                    냉장고 속 재료 칩들을 조합해서 바로 구글 레시피 창을 띄울 수 있는 간편 검색창입니다.
+                  </p>
                 </div>
               </div>
             )}
-
-            {/* 아이디어 목록 카드 그리드 */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {cookingIdeas.length === 0 ? (
-                <div className="col-span-full text-center py-10 text-gray-400 text-xs border border-dashed border-[#E0DBCF] rounded-2xl bg-white/30">
-                  아직 등록된 요리 아이디어가 없습니다. 위 버튼을 눌러 새 레시피 구상을 등록해 보세요!
-                </div>
-              ) : (
-                cookingIdeas.map(idea => (
-                  <div
-                    key={idea.id}
-                    draggable
-                    onDragStart={e => handleIdeaDragStart(e, idea)}
-                    className="bg-white/90 border border-[#E0DBCF] rounded-xl p-3.5 shadow-2xs hover:shadow-sm cursor-grab active:cursor-grabbing transition-all relative flex flex-col justify-between min-h-[105px] gap-2.5"
-                    title="식단 요일/끼니 격자로 드래그해서 배치하세요 🚀"
-                  >
-                    <div className="flex justify-between items-start gap-1.5">
-                      <p className="text-xs font-bold text-[#4A4A4A] leading-relaxed break-words flex-1">
-                        💡 {idea.text}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => onDeleteCookingIdea(idea.id)}
-                        className="text-[#9E7676] hover:bg-[#F2E1E1] p-1 rounded-lg transition-colors shrink-0"
-                        title="아이디어 폐기"
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    </div>
-
-                    <div className="flex flex-wrap gap-0.5 items-center mt-auto">
-                      {idea.ingredients && idea.ingredients.length > 0 ? (
-                        idea.ingredients.map((ing, ingIdx) => {
-                          const inFridge = checkIngredientInFridge(ing, ingredients);
-                          return (
-                            <span
-                              key={ingIdx}
-                              className={`text-[8px] font-bold px-1.5 py-0.2 rounded-md ${
-                                inFridge ? 'bg-[#DDE5D7] text-[#5D6D54]' : 'bg-[#F2E1E1] text-[#9E7676] border border-[#E9C7C7]/40'
-                              }`}
-                            >
-                              {ing}
-                            </span>
-                          );
-                        })
-                      ) : (
-                        <span className="text-[9px] text-gray-300 italic">재료 미등록</span>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
           </div>
-
-          {/* 👉 우측 1컬럼: 레시피 검색 창 */}
-          <div className="lg:col-span-1 border-t lg:border-t-0 lg:border-l border-dashed border-[#E0DBCF] lg:pl-6 pt-4 lg:pt-0 space-y-3.5 recipe-search-container">
-            <span className="text-xs font-bold text-[#5D6D54] flex items-center gap-1.5">
-              <span>🔍</span> 퀵 레시피 구글 검색
-            </span>
-
-            <div className="space-y-3 text-xs">
-              <div className="relative">
-                <div
-                  className="min-h-[42px] w-full bg-white border border-[#E0DBCF] rounded-xl p-1.5 flex flex-wrap gap-1 items-center cursor-text focus-within:ring-1 focus-within:ring-[#829379] transition-all"
-                  onClick={() => setIsRecipeDropdownOpen(true)}
-                >
-                  {/* 선택 태그들 */}
-                  {selectedRecipeTags.map(tag => (
-                    <span
-                      key={tag}
-                      className="bg-[#DDE5D7] text-[#5D6D54] border border-[#C9D5C3]/60 font-bold text-[10px] pl-2 pr-1 py-0.5 rounded-lg flex items-center gap-0.5"
-                    >
-                      <span>{tag}</span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleRecipeTag(tag);
-                        }}
-                        className="hover:bg-[#C9D5C3]/80 rounded p-0.5 text-[9px]"
-                      >
-                        <X size={10} />
-                      </button>
-                    </span>
-                  ))}
-
-                  {/* 검색어 인풋 */}
-                  <input
-                    type="text"
-                    value={recipeSearchQuery}
-                    onChange={e => {
-                      setRecipeSearchQuery(e.target.value);
-                      setIsRecipeDropdownOpen(true);
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (recipeSearchQuery.trim()) {
-                          const q = recipeSearchQuery.trim();
-                          if (!selectedRecipeTags.includes(q)) {
-                            handleToggleRecipeTag(q);
-                          }
-                          setRecipeSearchQuery('');
-                        }
-                      }
-                    }}
-                    placeholder={selectedRecipeTags.length === 0 ? "재료 명칭 입력..." : ""}
-                    className="flex-1 bg-transparent border-none text-xs text-[#4A4A4A] px-1 focus:outline-hidden min-w-[70px]"
-                  />
-                  <Search size={13} className="text-gray-400 mr-1" />
-                </div>
-
-                {/* 자동매칭 드롭다운 */}
-                {isRecipeDropdownOpen && (
-                  <div className="absolute left-0 right-0 mt-1 z-30 max-h-48 overflow-y-auto bg-white border border-[#E0DBCF] rounded-xl shadow-xl p-2 space-y-1">
-                    <div className="flex justify-between items-center px-1 pb-1 border-b border-[#E0DBCF]/60 mb-1">
-                      <span className="text-[9px] text-gray-400 font-bold">냉장고 보관 재료</span>
-                      <button
-                        type="button"
-                        onClick={() => setIsRecipeDropdownOpen(false)}
-                        className="text-[9px] text-gray-400 hover:text-gray-600 font-bold"
-                      >
-                        닫기
-                      </button>
-                    </div>
-
-                    {filteredMaterials.length === 0 ? (
-                      <p className="text-[10px] text-gray-400 py-3 text-center">
-                        {recipeSearchQuery ? "매칭되는 재료 없음" : "냉장고에 재료가 없어요!"}
-                      </p>
-                    ) : (
-                      filteredMaterials.map(mat => {
-                        const isSelected = selectedRecipeTags.includes(mat);
-                        return (
-                          <button
-                            key={mat}
-                            type="button"
-                            onClick={() => handleToggleRecipeTag(mat)}
-                            className="w-full text-left text-xs px-2 py-1.5 rounded-lg transition-colors flex items-center justify-between hover:bg-[#F9F7F2] text-gray-600"
-                          >
-                            <span>{mat}</span>
-                            {isSelected && <span className="text-[10px] text-[#5D6D54] font-bold">✓</span>}
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* 검색 실행 버튼 */}
-              <button
-                type="button"
-                onClick={handleGoogleRecipeSearch}
-                className="w-full bg-[#9E7676] hover:bg-[#835A5A] text-white font-bold py-2.5 rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5"
-              >
-                <span>🔍 구글 레시피 검색 ({selectedRecipeTags.length})</span>
-              </button>
-              
-              <p className="text-[9px] text-gray-400 leading-normal text-center italic">
-                냉장고 속 재료 칩들을 조합해서 바로 구글 레시피 창을 띄울 수 있는 간편 검색창입니다.
-              </p>
-            </div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

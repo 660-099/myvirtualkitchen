@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { Ingredient, StorageLocation } from '../types';
 import { calculateDDay, formatDate } from '../utils';
 import { AlertCircle, X, Plus, Minus, Trash2 } from 'lucide-react';
+import { DESIGN_THEME } from '../theme';
 
 interface UrgentAlertsProps {
   ingredients: Ingredient[];
@@ -24,6 +25,7 @@ export default function UrgentAlerts({
 
   // 수정 대상 식재료 상태
   const [editingItem, setEditingItem] = useState<Ingredient | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // 간이 모달 내의 수정 폼 데이터
   const [editName, setEditName] = useState('');
@@ -52,6 +54,7 @@ export default function UrgentAlerts({
     setEditUnit(item.unit || '개');
     setEditMemo(item.memo || '');
     setEditOpened(item.opened || false);
+    setConfirmDelete(false);
   };
 
   // 수정 저장
@@ -73,10 +76,16 @@ export default function UrgentAlerts({
   // 수정 삭제
   const handleConfirmDelete = () => {
     if (!editingItem) return;
-    if (confirm(`'${editingItem.name}' 식재료를 삭제하시겠습니까?`)) {
-      onDeleteIngredient(editingItem.id);
-      setEditingItem(null);
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      setTimeout(() => {
+        setConfirmDelete(false);
+      }, 3000);
+      return;
     }
+    onDeleteIngredient(editingItem.id);
+    setEditingItem(null);
+    setConfirmDelete(false);
   };
 
   // 오늘 기준 유통기한이 설정한 일수 이하로 남았거나 지난 재료 필터링
@@ -90,16 +99,16 @@ export default function UrgentAlerts({
     .sort((a, b) => a.ddayInfo.days - b.ddayInfo.days);
 
   return (
-    <div className="bg-[#F4EFEB]/60 border border-[#E0DBCF] rounded-2xl p-4 mb-5 shadow-sm relative">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#E0DBCF]/60 pb-2.5 mb-3">
-        <div className="flex items-center gap-2 text-[#7A6A53] font-serif font-bold text-sm md:text-base">
-          <AlertCircle size={18} className="shrink-0" />
+    <div className={`${DESIGN_THEME.colors.warning.bgLight} border ${DESIGN_THEME.colors.warning.border} ${DESIGN_THEME.layout.roundedLarge} ${DESIGN_THEME.layout.paddingCard} mb-5 shadow-2xs relative`}>
+      <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b ${DESIGN_THEME.colors.warning.border} pb-2.5 mb-3`}>
+        <div className={`flex items-center gap-2 ${DESIGN_THEME.colors.warning.text} ${DESIGN_THEME.fonts.sans} font-bold text-sm md:text-base`}>
+          <AlertCircle size={DESIGN_THEME.icons.sizes.md} className="shrink-0" />
           <span className="whitespace-nowrap">긴급 소비 (D-{daysThreshold})</span>
         </div>
 
         {/* 직접 일수 입력 설정 옵션 */}
         <form onSubmit={handleApplyThreshold} className="flex items-center gap-1.5 self-end sm:self-auto">
-          <span className="text-[11px] text-gray-500 whitespace-nowrap">조회 범위:</span>
+          <span className={`${DESIGN_THEME.fontSizes.caption} whitespace-nowrap`}>조회 범위:</span>
           <input
             type="number"
             min="1"
@@ -108,10 +117,10 @@ export default function UrgentAlerts({
             onChange={e => setDaysInput(e.target.value)}
             className="w-12 bg-white border border-[#E0DBCF] rounded-lg px-1.5 py-0.5 text-center text-xs text-[#4A4A4A] focus:outline-hidden focus:ring-1 focus:ring-[#829379]"
           />
-          <span className="text-[11px] text-gray-500 whitespace-nowrap">일 이내</span>
+          <span className={`${DESIGN_THEME.fontSizes.caption} whitespace-nowrap`}>일 이내</span>
           <button
             type="submit"
-            className="bg-[#829379] hover:bg-[#6D7D65] text-white font-bold text-[10px] px-2.5 py-0.5 rounded-lg transition-colors shadow-xs whitespace-nowrap"
+            className={`${DESIGN_THEME.buttons.badgeBtn} whitespace-nowrap`}
           >
             변경
           </button>
@@ -119,7 +128,7 @@ export default function UrgentAlerts({
       </div>
 
       {urgentItems.length === 0 ? (
-        <div className="py-6 text-center text-gray-400 text-xs font-sans">
+        <div className={DESIGN_THEME.containers.emptyZone}>
           설정 기간 내 소비해야 할 임박 식재료가 없습니다.
         </div>
       ) : (
@@ -140,10 +149,10 @@ export default function UrgentAlerts({
                 key={item.id}
                 style={{ minWidth: '140px', maxWidth: '170px' }}
                 onClick={() => handleCardClick(item)}
-                className={`flex-shrink-0 flex items-center gap-2 bg-white rounded-xl p-2.5 transition-all duration-200 border cursor-pointer hover:shadow-md hover:scale-[1.02] hover:border-[#829379] ${
+                className={`flex-shrink-0 flex items-center gap-2 bg-white rounded-xl p-2.5 transition-all duration-200 border cursor-pointer hover:shadow-md hover:scale-[1.02] ${
                   isUrgentDanger 
-                    ? 'border-[#E57373] bg-[#FFF8F8]' 
-                    : 'border-[#E0DBCF]/60'
+                    ? 'border-red-400 bg-red-50/50 hover:border-red-500' 
+                    : 'border-[#E0DBCF]/60 hover:border-[#829379]'
                 }`}
                 title="클릭하여 상세 정보 보기 및 수정"
               >
@@ -152,10 +161,10 @@ export default function UrgentAlerts({
                     {item.emoji} {item.name}
                   </p>
                   <div className="flex items-center justify-between gap-1 mt-1">
-                    <p className="text-[10px] text-gray-400 font-medium truncate font-sans">
+                    <p className={`${DESIGN_THEME.fontSizes.meta} font-medium truncate`}>
                       {item.quantity}{item.unit || '개'}
                     </p>
-                    <span className={`text-[10px] font-mono font-bold ${isUrgentDanger ? 'text-[#E53E3E]' : 'text-[#7A6A53]'}`}>
+                    <span className={`text-[10px] ${DESIGN_THEME.fonts.mono} font-bold ${isUrgentDanger ? 'text-red-500' : 'text-[#7A6A53]'}`}>
                       {ddayLabel}
                     </span>
                   </div>
@@ -168,10 +177,16 @@ export default function UrgentAlerts({
 
       {/* 🛠️ 식재료 간이 수정 모달 (Overlay) */}
       {editingItem && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50 backdrop-blur-xs">
-          <div className="bg-white border border-[#E0DBCF] rounded-2xl w-full max-w-sm p-5 shadow-2xl text-[#4A4A4A] space-y-4">
+        <div 
+          onClick={() => setEditingItem(null)}
+          className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50 backdrop-blur-xs cursor-pointer"
+        >
+          <div 
+            onClick={e => e.stopPropagation()}
+            className={`bg-white border ${DESIGN_THEME.colors.neutral.border} ${DESIGN_THEME.layout.roundedLarge} w-full max-w-sm p-5 shadow-2xl text-[#4A4A4A] space-y-4 cursor-default`}
+          >
             <div className="flex items-center justify-between border-b border-dashed border-[#E0DBCF] pb-2.5">
-              <h3 className="font-serif font-bold text-sm text-[#5D6D54] flex items-center gap-1.5">
+              <h3 className={`${DESIGN_THEME.colors.primary.text} ${DESIGN_THEME.fonts.sans} font-bold text-sm flex items-center gap-1.5`}>
                 <span>{editingItem.emoji}</span> 식재료 수정
               </h3>
               <button
@@ -179,30 +194,30 @@ export default function UrgentAlerts({
                 onClick={() => setEditingItem(null)}
                 className="text-gray-400 hover:text-gray-600 transition-colors"
               >
-                <X size={16} />
+                <X size={DESIGN_THEME.icons.sizes.md} />
               </button>
             </div>
 
             <div className="space-y-3 text-xs">
               {/* 이름 */}
               <div>
-                <label className="text-[10px] text-gray-400 font-bold block mb-1">식재료 명칭</label>
+                <label className={`${DESIGN_THEME.fontSizes.caption} font-bold block mb-1`}>식재료 명칭</label>
                 <input
                   type="text"
                   value={editName}
                   onChange={e => setEditName(e.target.value)}
-                  className="w-full bg-[#F9F7F2] border border-[#E0DBCF] rounded-lg px-2.5 py-1.5 focus:outline-hidden focus:ring-1 focus:ring-[#829379]"
+                  className={DESIGN_THEME.inputs.text}
                 />
               </div>
 
               {/* 보관 장소 및 개봉 여부 */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] text-gray-400 font-bold block mb-1">보관 위치</label>
+                  <label className={`${DESIGN_THEME.fontSizes.caption} font-bold block mb-1`}>보관 위치</label>
                   <select
                     value={editLocation}
                     onChange={e => setEditLocation(e.target.value as StorageLocation)}
-                    className="w-full bg-[#F9F7F2] border border-[#E0DBCF] rounded-lg px-2 py-1.5 focus:outline-hidden"
+                    className={DESIGN_THEME.inputs.select}
                   >
                     <option value="fridge">냉장실</option>
                     <option value="freezer">냉동실</option>
@@ -217,7 +232,7 @@ export default function UrgentAlerts({
                       type="checkbox"
                       checked={editOpened}
                       onChange={e => setEditOpened(e.target.checked)}
-                      className="rounded-sm border-[#E0DBCF] text-[#829379] focus:ring-[#829379] h-3.5 w-3.5"
+                      className={DESIGN_THEME.inputs.checkbox}
                     />
                     <span className="text-[11px] font-bold">개봉함</span>
                   </label>
@@ -227,17 +242,17 @@ export default function UrgentAlerts({
               {/* 유통기한 및 수량 */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] text-gray-400 font-bold block mb-1">유통기한</label>
+                  <label className={`${DESIGN_THEME.fontSizes.caption} font-bold block mb-1`}>유통기한</label>
                   <input
                     type="date"
                     value={editExpiryDate}
                     onChange={e => setEditExpiryDate(e.target.value)}
-                    className="w-full bg-[#F9F7F2] border border-[#E0DBCF] rounded-lg px-2 py-1.5 focus:outline-hidden font-mono"
+                    className={`${DESIGN_THEME.inputs.text} ${DESIGN_THEME.fonts.mono}`}
                   />
                 </div>
 
                 <div>
-                  <label className="text-[10px] text-gray-400 font-bold block mb-1">수량 / 단위</label>
+                  <label className={`${DESIGN_THEME.fontSizes.caption} font-bold block mb-1`}>수량 / 단위</label>
                   <div className="flex items-center gap-1 bg-[#F9F7F2] border border-[#E0DBCF] rounded-lg px-1 py-0.5">
                     <button
                       type="button"
@@ -276,13 +291,13 @@ export default function UrgentAlerts({
 
               {/* 메모 */}
               <div>
-                <label className="text-[10px] text-gray-400 font-bold block mb-1">메모</label>
+                <label className={`${DESIGN_THEME.fontSizes.caption} font-bold block mb-1`}>메모</label>
                 <input
                   type="text"
                   value={editMemo}
                   onChange={e => setEditMemo(e.target.value)}
                   placeholder="특이사항 적기"
-                  className="w-full bg-[#F9F7F2] border border-[#E0DBCF] rounded-lg px-2.5 py-1.5 focus:outline-hidden focus:ring-1 focus:ring-[#829379]"
+                  className={DESIGN_THEME.inputs.text}
                 />
               </div>
             </div>
@@ -292,24 +307,24 @@ export default function UrgentAlerts({
               <button
                 type="button"
                 onClick={handleConfirmDelete}
-                className="text-xs font-bold text-[#9E7676] bg-[#F2E1E1] hover:bg-[#E9C7C7] px-3 py-2 rounded-xl flex items-center gap-1 transition-all"
+                className={confirmDelete ? DESIGN_THEME.buttons.dangerConfirm : DESIGN_THEME.buttons.danger}
               >
                 <Trash2 size={13} />
-                <span>삭제</span>
+                <span>{confirmDelete ? '진짜 삭제? (한번 더!)' : '삭제'}</span>
               </button>
 
               <div className="flex gap-1.5">
                 <button
                   type="button"
                   onClick={() => setEditingItem(null)}
-                  className="text-xs font-bold text-gray-500 bg-[#F9F7F2] hover:bg-[#E0DBCF]/50 px-3 py-2 rounded-xl transition-all"
+                  className={DESIGN_THEME.buttons.secondary}
                 >
                   취소
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveEdit}
-                  className="text-xs font-bold text-white bg-[#829379] hover:bg-[#6D7D65] px-4 py-2 rounded-xl transition-all shadow-md"
+                  className={DESIGN_THEME.buttons.primary}
                 >
                   저장
                 </button>

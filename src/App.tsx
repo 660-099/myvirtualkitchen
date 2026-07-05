@@ -76,105 +76,254 @@ export default function App() {
   // 통합 탭 상태 관리 ('home' | 'fridge' | 'mealplan' | 'shopping')
   const [currentTab, setCurrentTab] = useState<'home' | 'fridge' | 'mealplan' | 'shopping'>('home');
 
+  // --- Undo / Redo 역사 관리용 ---
+  interface AppStateSnapshot {
+    ingredients: Ingredient[];
+    mealPlans: MealPlan;
+    cookingIdeas: CookingIdea[];
+    shoppingList: ShoppingItem[];
+  }
+
+  const historyRef = React.useRef<AppStateSnapshot[]>([]);
+  const historyIndexRef = React.useRef<number>(-1);
+  const isUndoRedoingRef = React.useRef<boolean>(false);
+
+  const stateRef = React.useRef<AppStateSnapshot>({
+    ingredients: [],
+    mealPlans: {},
+    cookingIdeas: [],
+    shoppingList: [],
+  });
+
+  useEffect(() => {
+    stateRef.current = { ingredients, mealPlans, cookingIdeas, shoppingList };
+  }, [ingredients, mealPlans, cookingIdeas, shoppingList]);
+
   // --- 로컬 스토리지 연동 ---
   useEffect(() => {
     // 1. 식재료
+    let initIngredients: Ingredient[] = [];
     const storedIngs = localStorage.getItem('freshlog_ingredients');
     if (storedIngs) {
       try {
-        setIngredients(JSON.parse(storedIngs));
+        initIngredients = JSON.parse(storedIngs);
       } catch (e) {
-        setIngredients(getInitialIngredients());
+        initIngredients = getInitialIngredients();
       }
     } else {
-      const init = getInitialIngredients();
-      setIngredients(init);
-      localStorage.setItem('freshlog_ingredients', JSON.stringify(init));
+      initIngredients = getInitialIngredients();
     }
+    setIngredients(initIngredients);
 
     // 2. 밀 플랜
+    let initMealPlans: MealPlan = {};
     const storedPlans = localStorage.getItem('freshlog_mealplan');
     if (storedPlans) {
       try {
         const parsed = JSON.parse(storedPlans);
-        const migrated = migrateMealPlans(parsed);
-        setMealPlans(migrated);
-        localStorage.setItem('freshlog_mealplan', JSON.stringify(migrated));
+        initMealPlans = migrateMealPlans(parsed);
       } catch (e) {
-        setMealPlans(getInitialMealPlans());
+        initMealPlans = getInitialMealPlans();
       }
     } else {
-      const init = getInitialMealPlans();
-      setMealPlans(init);
-      localStorage.setItem('freshlog_mealplan', JSON.stringify(init));
+      initMealPlans = getInitialMealPlans();
     }
+    setMealPlans(initMealPlans);
 
     // 3. 아이디어
+    let initIdeas: CookingIdea[] = [];
     const storedIdeas = localStorage.getItem('freshlog_ideas');
     if (storedIdeas) {
       try {
-        setCookingIdeas(JSON.parse(storedIdeas));
+        initIdeas = JSON.parse(storedIdeas);
       } catch (e) {
-        setCookingIdeas(getInitialIdeas());
+        initIdeas = getInitialIdeas();
       }
     } else {
-      const init = getInitialIdeas();
-      setCookingIdeas(init);
-      localStorage.setItem('freshlog_ideas', JSON.stringify(init));
+      initIdeas = getInitialIdeas();
     }
+    setCookingIdeas(initIdeas);
 
     // 4. 장보기
+    let initShopping: ShoppingItem[] = [];
     const storedShopping = localStorage.getItem('freshlog_shopping');
     if (storedShopping) {
       try {
-        setShoppingList(JSON.parse(storedShopping));
+        initShopping = JSON.parse(storedShopping);
       } catch (e) {
-        setShoppingList(getInitialShopping());
+        initShopping = getInitialShopping();
       }
     } else {
-      const init = getInitialShopping();
-      setShoppingList(init);
-      localStorage.setItem('freshlog_shopping', JSON.stringify(init));
+      initShopping = getInitialShopping();
     }
+    setShoppingList(initShopping);
+
+    // 역사 초기화
+    const initialSnapshot: AppStateSnapshot = {
+      ingredients: initIngredients,
+      mealPlans: initMealPlans,
+      cookingIdeas: initIdeas,
+      shoppingList: initShopping,
+    };
+    stateRef.current = initialSnapshot;
+    historyRef.current = [initialSnapshot];
+    historyIndexRef.current = 0;
   }, []);
 
-  // 상태 변화 시 로컬 스토리지 업데이트
+  // 상태 변화 시 로컬 스토리지 업데이트 및 역사 기록
+  const commitState = (
+    nextIngredients: Ingredient[],
+    nextMealPlans: MealPlan,
+    nextIdeas: CookingIdea[],
+    nextShopping: ShoppingItem[]
+  ) => {
+    // 동기식 레프 업데이트로 즉각적인 동시적 상태 조작 시 stale state 오버라이트 방지
+    stateRef.current = {
+      ingredients: nextIngredients,
+      mealPlans: nextMealPlans,
+      cookingIdeas: nextIdeas,
+      shoppingList: nextShopping,
+    };
+
+    setIngredients(nextIngredients);
+    setMealPlans(nextMealPlans);
+    setCookingIdeas(nextIdeas);
+    setShoppingList(nextShopping);
+
+    localStorage.setItem('freshlog_ingredients', JSON.stringify(nextIngredients));
+    localStorage.setItem('freshlog_mealplan', JSON.stringify(nextMealPlans));
+    localStorage.setItem('freshlog_ideas', JSON.stringify(nextIdeas));
+    localStorage.setItem('freshlog_shopping', JSON.stringify(nextShopping));
+
+    if (!isUndoRedoingRef.current) {
+      const snapshot: AppStateSnapshot = {
+        ingredients: nextIngredients,
+        mealPlans: nextMealPlans,
+        cookingIdeas: nextIdeas,
+        shoppingList: nextShopping,
+      };
+      
+      const newHistory = historyRef.current.slice(0, historyIndexRef.current + 1);
+      newHistory.push(snapshot);
+      
+      if (newHistory.length > 100) {
+        newHistory.shift();
+      }
+      
+      historyRef.current = newHistory;
+      historyIndexRef.current = newHistory.length - 1;
+    }
+  };
+
   const saveIngredients = (data: Ingredient[]) => {
-    setIngredients(data);
-    localStorage.setItem('freshlog_ingredients', JSON.stringify(data));
+    commitState(data, stateRef.current.mealPlans, stateRef.current.cookingIdeas, stateRef.current.shoppingList);
   };
 
   const saveMealPlans = (data: MealPlan) => {
-    setMealPlans(data);
-    localStorage.setItem('freshlog_mealplan', JSON.stringify(data));
+    commitState(stateRef.current.ingredients, data, stateRef.current.cookingIdeas, stateRef.current.shoppingList);
   };
 
   const saveIdeas = (data: CookingIdea[]) => {
-    setCookingIdeas(data);
-    localStorage.setItem('freshlog_ideas', JSON.stringify(data));
+    commitState(stateRef.current.ingredients, stateRef.current.mealPlans, data, stateRef.current.shoppingList);
   };
 
   const saveShopping = (data: ShoppingItem[]) => {
-    setShoppingList(data);
-    localStorage.setItem('freshlog_shopping', JSON.stringify(data));
+    commitState(stateRef.current.ingredients, stateRef.current.mealPlans, stateRef.current.cookingIdeas, data);
   };
+
+  const handleUndo = () => {
+    if (historyIndexRef.current > 0) {
+      isUndoRedoingRef.current = true;
+      const prevIndex = historyIndexRef.current - 1;
+      const prevSnapshot = historyRef.current[prevIndex];
+      
+      setIngredients(prevSnapshot.ingredients);
+      setMealPlans(prevSnapshot.mealPlans);
+      setCookingIdeas(prevSnapshot.cookingIdeas);
+      setShoppingList(prevSnapshot.shoppingList);
+
+      localStorage.setItem('freshlog_ingredients', JSON.stringify(prevSnapshot.ingredients));
+      localStorage.setItem('freshlog_mealplan', JSON.stringify(prevSnapshot.mealPlans));
+      localStorage.setItem('freshlog_ideas', JSON.stringify(prevSnapshot.cookingIdeas));
+      localStorage.setItem('freshlog_shopping', JSON.stringify(prevSnapshot.shoppingList));
+
+      historyIndexRef.current = prevIndex;
+      isUndoRedoingRef.current = false;
+    }
+  };
+
+  const handleRedo = () => {
+    if (historyIndexRef.current < historyRef.current.length - 1) {
+      isUndoRedoingRef.current = true;
+      const nextIndex = historyIndexRef.current + 1;
+      const nextSnapshot = historyRef.current[nextIndex];
+      
+      setIngredients(nextSnapshot.ingredients);
+      setMealPlans(nextSnapshot.mealPlans);
+      setCookingIdeas(nextSnapshot.cookingIdeas);
+      setShoppingList(nextSnapshot.shoppingList);
+
+      localStorage.setItem('freshlog_ingredients', JSON.stringify(nextSnapshot.ingredients));
+      localStorage.setItem('freshlog_mealplan', JSON.stringify(nextSnapshot.mealPlans));
+      localStorage.setItem('freshlog_ideas', JSON.stringify(nextSnapshot.cookingIdeas));
+      localStorage.setItem('freshlog_shopping', JSON.stringify(nextSnapshot.shoppingList));
+
+      historyIndexRef.current = nextIndex;
+      isUndoRedoingRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeElement = document.activeElement;
+      if (
+        activeElement &&
+        (activeElement.tagName === 'INPUT' ||
+          activeElement.tagName === 'TEXTAREA' ||
+          activeElement.getAttribute('contenteditable') === 'true')
+      ) {
+        return;
+      }
+
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const isCmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+
+      if (isCmdOrCtrl && e.key.toLowerCase() === 'z') {
+        if (e.shiftKey) {
+          e.preventDefault();
+          handleRedo();
+        } else {
+          e.preventDefault();
+          handleUndo();
+        }
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   // --- 1. 식재료 액션 ---
   const handleAddIngredient = (newItem: Omit<Ingredient, 'id'>) => {
     const id = `ing-${Date.now()}`;
-    const updated = [...ingredients, { ...newItem, id }];
+    const updated = [...stateRef.current.ingredients, { ...newItem, id }];
     saveIngredients(updated);
   };
 
   const handleUpdateIngredient = (id: string, updated: Partial<Ingredient>) => {
-    const updatedList = ingredients.map(item =>
+    const updatedList = stateRef.current.ingredients.map(item =>
       item.id === id ? { ...item, ...updated } : item
     );
     saveIngredients(updatedList);
   };
 
   const handleDeleteIngredient = (id: string) => {
-    const filtered = ingredients.filter(item => item.id !== id);
+    const filtered = stateRef.current.ingredients.filter(item => item.id !== id);
     saveIngredients(filtered);
   };
 
@@ -184,7 +333,7 @@ export default function App() {
     mealTime: MealTime,
     cards: MealCard[]
   ) => {
-    const currentDayPlan = mealPlans[dateStr] || {
+    const currentDayPlan = stateRef.current.mealPlans[dateStr] || {
       breakfast: [],
       lunch: [],
       dinner: [],
@@ -197,8 +346,40 @@ export default function App() {
     };
 
     const updatedPlans = {
-      ...mealPlans,
+      ...stateRef.current.mealPlans,
       [dateStr]: updatedDayPlan,
+    };
+
+    saveMealPlans(updatedPlans);
+  };
+
+  const handleMoveMealCard = (
+    sourceDate: string,
+    sourceTime: MealTime,
+    targetDate: string,
+    targetTime: MealTime,
+    card: MealCard
+  ) => {
+    const updatedPlans = { ...stateRef.current.mealPlans };
+
+    // 1. Remove from source
+    if (updatedPlans[sourceDate] && updatedPlans[sourceDate][sourceTime]) {
+      updatedPlans[sourceDate] = {
+        ...updatedPlans[sourceDate],
+        [sourceTime]: updatedPlans[sourceDate][sourceTime].filter(c => c.id !== card.id),
+      };
+    }
+
+    // 2. Add to target
+    const targetDay = updatedPlans[targetDate] || {
+      breakfast: [],
+      lunch: [],
+      dinner: [],
+      snack: [],
+    };
+    updatedPlans[targetDate] = {
+      ...targetDay,
+      [targetTime]: [...(targetDay[targetTime] || []).filter(c => c.id !== card.id), card],
     };
 
     saveMealPlans(updatedPlans);
@@ -210,11 +391,83 @@ export default function App() {
       text,
       ingredients: ingredientsList,
     };
-    saveIdeas([...cookingIdeas, newIdea]);
+    saveIdeas([...stateRef.current.cookingIdeas, newIdea]);
   };
 
   const handleDeleteCookingIdea = (id: string) => {
-    saveIdeas(cookingIdeas.filter(idea => idea.id !== id));
+    saveIdeas(stateRef.current.cookingIdeas.filter(idea => idea.id !== id));
+  };
+
+  const handleDropIdeaToMealPlan = (
+    ideaId: string,
+    text: string,
+    ideaIngs: string[],
+    targetDate: string,
+    targetTime: MealTime
+  ) => {
+    const newCard: MealCard = {
+      id: `meal-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      title: text,
+      ingredients: ideaIngs,
+      memo: '',
+      recipeUrl: '',
+    };
+
+    const currentDayPlan = stateRef.current.mealPlans[targetDate] || {
+      breakfast: [],
+      lunch: [],
+      dinner: [],
+      snack: [],
+    };
+
+    const updatedDayPlan = {
+      ...currentDayPlan,
+      [targetTime]: [...(currentDayPlan[targetTime] || []).filter(c => c.id !== newCard.id), newCard],
+    };
+
+    const updatedPlans = {
+      ...stateRef.current.mealPlans,
+      [targetDate]: updatedDayPlan,
+    };
+
+    const updatedIdeas = stateRef.current.cookingIdeas.filter(idea => idea.id !== ideaId);
+
+    commitState(
+      stateRef.current.ingredients,
+      updatedPlans,
+      updatedIdeas,
+      stateRef.current.shoppingList
+    );
+  };
+
+  const handleMoveMealCardToIdeas = (
+    sourceDate: string,
+    sourceTime: MealTime,
+    cardId: string,
+    cardTitle: string,
+    cardIngredients: string[]
+  ) => {
+    const updatedPlans = { ...stateRef.current.mealPlans };
+    if (updatedPlans[sourceDate] && updatedPlans[sourceDate][sourceTime]) {
+      updatedPlans[sourceDate] = {
+        ...updatedPlans[sourceDate],
+        [sourceTime]: updatedPlans[sourceDate][sourceTime].filter(c => c.id !== cardId),
+      };
+    }
+
+    const newIdea: CookingIdea = {
+      id: `idea-${Date.now()}`,
+      text: cardTitle,
+      ingredients: cardIngredients,
+    };
+    const updatedIdeas = [...stateRef.current.cookingIdeas, newIdea];
+
+    commitState(
+      stateRef.current.ingredients,
+      updatedPlans,
+      updatedIdeas,
+      stateRef.current.shoppingList
+    );
   };
 
   // --- 3. 장보기 액션 ---
@@ -380,9 +633,12 @@ export default function App() {
                     mealPlans={mealPlans}
                     cookingIdeas={cookingIdeas}
                     onUpdateMealPlan={handleUpdateMealPlan}
+                    onMoveMealCard={handleMoveMealCard}
                     onAddCookingIdea={handleAddCookingIdea}
                     onDeleteCookingIdea={handleDeleteCookingIdea}
                     onAutoAddShoppingItems={handleAutoAddShoppingItems}
+                    onAddIdeaToMealPlan={handleDropIdeaToMealPlan}
+                    onMoveMealCardToIdeas={handleMoveMealCardToIdeas}
                   />
 
                   <div className="pt-2">
@@ -417,9 +673,12 @@ export default function App() {
                     mealPlans={mealPlans}
                     cookingIdeas={cookingIdeas}
                     onUpdateMealPlan={handleUpdateMealPlan}
+                    onMoveMealCard={handleMoveMealCard}
                     onAddCookingIdea={handleAddCookingIdea}
                     onDeleteCookingIdea={handleDeleteCookingIdea}
                     onAutoAddShoppingItems={handleAutoAddShoppingItems}
+                    onAddIdeaToMealPlan={handleDropIdeaToMealPlan}
+                    onMoveMealCardToIdeas={handleMoveMealCardToIdeas}
                   />
                 </section>
 
@@ -473,9 +732,12 @@ export default function App() {
                 mealPlans={mealPlans}
                 cookingIdeas={cookingIdeas}
                 onUpdateMealPlan={handleUpdateMealPlan}
+                onMoveMealCard={handleMoveMealCard}
                 onAddCookingIdea={handleAddCookingIdea}
                 onDeleteCookingIdea={handleDeleteCookingIdea}
                 onAutoAddShoppingItems={handleAutoAddShoppingItems}
+                onAddIdeaToMealPlan={handleDropIdeaToMealPlan}
+                onMoveMealCardToIdeas={handleMoveMealCardToIdeas}
                 isWeekView={true}
               />
             </motion.div>

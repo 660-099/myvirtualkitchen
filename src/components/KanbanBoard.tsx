@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { Ingredient, StorageLocation } from '../types';
 import { analyzeIngredientName, ALL_EMOJIS, calculateDDay, formatDate, formatDisplayDate } from '../utils';
 import { Plus, Minus, ChevronDown, ChevronUp, Calendar, Trash2, Edit3, Save, PackagePlus } from 'lucide-react';
+import { DESIGN_THEME } from '../theme';
 
 interface KanbanBoardProps {
   ingredients: Ingredient[];
@@ -48,8 +49,31 @@ export default function KanbanBoard({
   // 이모지 선택기 팝오버 오픈 상태 (ingredientId -> boolean)
   const [activeEmojiPicker, setActiveEmojiPicker] = useState<string | null>(null);
 
+  // 커스텀 이모지 직접 입력을 위한 상태
+  const [customEmojiInputId, setCustomEmojiInputId] = useState<string | null>(null);
+  const [customEmojiText, setCustomEmojiText] = useState('');
+
   // 수량 조절용 편집 모드 상태
   const [editingQuantityId, setEditingQuantityId] = useState<string | null>(null);
+
+  // 2단계 식재료 삭제 클릭 확인 상태
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  // 식재료 추가 폼 및 인라인 날짜 수정 상태
+  const [isAddFormOpen, setIsAddFormOpen] = useState(false);
+  const [activeDateEdit, setActiveDateEdit] = useState<{ id: string; field: 'purchase' | 'opened' | 'frozen' } | null>(null);
+
+  const handleDeleteIngredientClick = (id: string) => {
+    if (confirmDeleteId !== id) {
+      setConfirmDeleteId(id);
+      setTimeout(() => {
+        setConfirmDeleteId(prev => prev === id ? null : prev);
+      }, 3000);
+      return;
+    }
+    onDeleteIngredient(id);
+    setConfirmDeleteId(null);
+  };
 
   // 한글 IME 입력 중복 방지 State
   const [isComposing, setIsComposing] = useState(false);
@@ -65,10 +89,11 @@ export default function KanbanBoard({
 
       // 이모지 팝오버 닫기
       if (activeEmojiPicker) {
-        const emojiBtn = document.getElementById(`emoji-btn-${activeEmojiPicker}`);
+        const emojiBtn = document.getElementById(`emoji-btn-${activeEmojiPicker}`) || document.getElementById(`emoji-btn-all-${activeEmojiPicker}`);
         const pickerBox = target.closest('.emoji-picker-popover');
         if (emojiBtn && !emojiBtn.contains(target) && !pickerBox) {
           setActiveEmojiPicker(null);
+          setCustomEmojiInputId(null);
         }
       }
 
@@ -211,8 +236,13 @@ export default function KanbanBoard({
     accentColor: string,
     isSingle: boolean = false
   ) => {
+    const isEmpty = items.length === 0;
     return (
-      <div className={`${isSingle ? 'w-full' : 'w-full lg:w-[23%] shrink-0 min-w-[270px]'} rounded-2xl p-4 border ${borderColor} ${bgColor} shadow-sm flex flex-col`}>
+      <div className={`${isSingle ? 'w-full' : 'w-full lg:w-[17%] shrink-0 min-w-[200px]'} rounded-2xl p-4 transition-all duration-200 ${
+        isEmpty
+          ? 'border-transparent bg-transparent shadow-none'
+          : `border ${borderColor} ${bgColor} shadow-sm`
+      } flex flex-col`}>
         {/* 칼럼 헤더 */}
         <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#E0DBCF] border-dashed">
           <h3 className="font-serif font-bold text-[#5D6D54] text-xs flex items-center gap-2">
@@ -225,8 +255,8 @@ export default function KanbanBoard({
 
         {/* 카드들: 보관별 내부 스크롤을 완전히 없애고 한데 흐르도록 함 */}
         <div className="flex flex-col gap-3">
-          {items.length === 0 ? (
-            <div className="text-center py-8 text-gray-400 text-xs font-sans border border-dashed border-[#E0DBCF] rounded-xl bg-white/50">
+          {isEmpty ? (
+            <div className="text-center py-6 text-gray-400 text-xs font-sans">
               비어있습니다.
             </div>
           ) : (
@@ -259,25 +289,87 @@ export default function KanbanBoard({
 
                       {/* 이모지 팝오버 셀렉터 */}
                       {activeEmojiPicker === item.id && (
-                        <div className="absolute top-6 left-0 z-50 bg-white border border-[#E0DBCF] rounded-xl p-1.5 shadow-xl w-44 emoji-picker-popover text-left">
-                          <p className="text-[9px] text-gray-400 font-bold mb-1 text-center">
-                            이모지 변경 🎨
+                        <div className="absolute top-6 left-0 z-50 bg-white border border-[#E0DBCF] rounded-xl p-2.5 shadow-xl w-52 emoji-picker-popover text-left space-y-2">
+                          <p className="text-[10px] text-[#5D6D54] font-bold text-center">
+                            이모지 변경
                           </p>
-                          <div className="grid grid-cols-5 gap-0.5">
-                            {ALL_EMOJIS.map(em => (
+                          <div className="grid grid-cols-5 gap-1">
+                            {ALL_EMOJIS.map(em => {
+                              const isCurrent = item.emoji === em;
+                              return (
+                                <button
+                                  key={em}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onUpdateIngredient(item.id, { emoji: em });
+                                    setActiveEmojiPicker(null);
+                                  }}
+                                  className={`text-base p-1 rounded-lg transition-colors flex items-center justify-center ${
+                                    isCurrent
+                                      ? 'bg-[#DDE5D7] text-[#5D6D54] font-bold border border-[#829379]/40'
+                                      : 'hover:bg-[#F9F7F2]'
+                                  }`}
+                                  title={isCurrent ? "현재 이모지" : ""}
+                                >
+                                  {em}
+                                </button>
+                              );
+                            })}
+                            
+                            {/* 커스텀 + 버튼 */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCustomEmojiInputId(item.id);
+                                setCustomEmojiText('');
+                              }}
+                              className="text-sm p-1 hover:bg-[#F9F7F2] rounded-lg transition-colors flex items-center justify-center font-bold text-[#829379] border border-dashed border-[#829379]/40 bg-[#829379]/5 animate-pulse"
+                              title="직접 입력"
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          {customEmojiInputId === item.id && (
+                            <div className="mt-2 pt-2 border-t border-dashed border-[#E0DBCF] flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                              <input
+                                type="text"
+                                maxLength={2}
+                                value={customEmojiText}
+                                onChange={e => setCustomEmojiText(e.target.value)}
+                                placeholder="직접 입력"
+                                className="flex-1 bg-[#F9F7F2] border border-[#E0DBCF] rounded-lg px-2 py-1 text-[11px] focus:outline-hidden font-sans"
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    const val = customEmojiText.trim();
+                                    if (val) {
+                                      onUpdateIngredient(item.id, { emoji: val });
+                                      setActiveEmojiPicker(null);
+                                      setCustomEmojiInputId(null);
+                                    }
+                                  }
+                                }}
+                              />
                               <button
-                                key={em}
+                                type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  onUpdateIngredient(item.id, { emoji: em });
-                                  setActiveEmojiPicker(null);
+                                  const val = customEmojiText.trim();
+                                  if (val) {
+                                    onUpdateIngredient(item.id, { emoji: val });
+                                    setActiveEmojiPicker(null);
+                                    setCustomEmojiInputId(null);
+                                  }
                                 }}
-                                className="text-xs p-1 hover:bg-[#F9F7F2] rounded-lg transition-colors"
+                                className="bg-[#829379] hover:bg-[#6D7D65] text-white text-[10px] font-bold px-2 py-1 rounded-lg shrink-0"
                               >
-                                {em}
+                                적용
                               </button>
-                            ))}
-                          </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -305,13 +397,15 @@ export default function KanbanBoard({
                               if (item.quantity > 1) {
                                 onUpdateIngredient(item.id, { quantity: item.quantity - 1 });
                               } else {
-                                if (confirm('이 재료를 냉장고에서 삭제할까요?')) {
-                                  onDeleteIngredient(item.id);
-                                }
+                                handleDeleteIngredientClick(item.id);
                               }
                             }}
-                            className="p-0.5 hover:text-[#829379] text-gray-400 transition-colors"
-                            title="감소"
+                            className={`p-0.5 transition-colors ${
+                              confirmDeleteId === item.id
+                                ? 'text-red-500 animate-pulse font-bold scale-110'
+                                : 'hover:text-[#829379] text-gray-400'
+                            }`}
+                            title={confirmDeleteId === item.id ? '한번 더 누르면 삭제!' : '감소'}
                           >
                             <Minus size={10} />
                           </button>
@@ -356,6 +450,24 @@ export default function KanbanBoard({
                   {/* 아코디언 상세 정보 */}
                   {item.isExpanded && (
                     <div className="mt-3 pt-3 border-t border-dashed border-[#E0DBCF] text-xs text-[#4A4A4A] space-y-2">
+                      {/* 삭제 버튼을 우측 상단으로 배치 */}
+                      <div className="flex justify-between items-center pb-1">
+                        <span className="text-[10px] text-[#4A4A4A]/60 font-bold">상세 정보</span>
+                        <button
+                          type="button"
+                          id={`del-btn-${item.id}`}
+                          onClick={() => handleDeleteIngredientClick(item.id)}
+                          className={`px-2 py-1 rounded-md transition-all duration-200 flex items-center gap-1 text-[9px] font-bold ${
+                            confirmDeleteId === item.id
+                              ? 'bg-red-500 text-white animate-pulse'
+                              : 'text-[#9E7676] bg-[#F2E1E1]/40 border border-[#E9C7C7]/40 hover:bg-[#F2E1E1]'
+                          }`}
+                        >
+                          <Trash2 size={10} />
+                          <span>{confirmDeleteId === item.id ? '진짜 삭제? (한번 더!)' : '삭제'}</span>
+                        </button>
+                      </div>
+
                       <div className="grid grid-cols-2 gap-2">
                         {/* 구매일 대신 유통기한 수정 */}
                         <div>
@@ -377,8 +489,7 @@ export default function KanbanBoard({
                             <button
                               type="button"
                               onClick={() => {
-                                const d = prompt('구매일을 입력하세요 (YYYY-MM-DD)', item.purchaseDate || formatDate(new Date()));
-                                if (d) onUpdateIngredient(item.id, { purchaseDate: d });
+                                setActiveDateEdit(activeDateEdit?.id === item.id && activeDateEdit?.field === 'purchase' ? null : { id: item.id, field: 'purchase' });
                               }}
                               className={`hover:text-[#829379] hover:underline whitespace-nowrap ${item.purchaseDate ? 'text-[#829379]' : ''}`}
                             >
@@ -388,8 +499,7 @@ export default function KanbanBoard({
                             <button
                               type="button"
                               onClick={() => {
-                                const d = prompt('개봉일을 입력하세요 (YYYY-MM-DD)', item.openedDate || formatDate(new Date()));
-                                if (d) onUpdateIngredient(item.id, { opened: true, openedDate: d });
+                                setActiveDateEdit(activeDateEdit?.id === item.id && activeDateEdit?.field === 'opened' ? null : { id: item.id, field: 'opened' });
                               }}
                               className={`hover:text-[#829379] hover:underline whitespace-nowrap ${item.opened && item.openedDate ? 'text-[#829379]' : ''}`}
                             >
@@ -399,19 +509,51 @@ export default function KanbanBoard({
                             <button
                               type="button"
                               onClick={() => {
-                                const d = prompt('냉동한 날짜를 입력하세요 (YYYY-MM-DD)', item.frozenDate || formatDate(new Date()));
-                                if (d) {
-                                  onUpdateIngredient(item.id, { 
-                                    frozenDate: d,
-                                    location: 'freezer'
-                                  });
-                                }
+                                setActiveDateEdit(activeDateEdit?.id === item.id && activeDateEdit?.field === 'frozen' ? null : { id: item.id, field: 'frozen' });
                               }}
                               className={`hover:text-[#829379] hover:underline whitespace-nowrap ${item.frozenDate ? 'text-[#829379]' : ''}`}
                             >
                               냉동일
                             </button>
                           </div>
+
+                          {activeDateEdit && activeDateEdit.id === item.id && (
+                            <div className="mt-2 p-1.5 bg-white border border-[#E0DBCF] rounded-lg flex items-center justify-between gap-1.5 shadow-2xs">
+                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                <span className="text-[9px] font-bold text-[#5D6D54] shrink-0">
+                                  {activeDateEdit.field === 'purchase' ? '구매일' : activeDateEdit.field === 'opened' ? '개봉일' : '냉동일'}
+                                </span>
+                                <input
+                                  type="date"
+                                  value={
+                                    activeDateEdit.field === 'purchase'
+                                      ? (item.purchaseDate || '')
+                                      : activeDateEdit.field === 'opened'
+                                      ? (item.openedDate || '')
+                                      : (item.frozenDate || '')
+                                  }
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    if (activeDateEdit.field === 'purchase') {
+                                      onUpdateIngredient(item.id, { purchaseDate: val });
+                                    } else if (activeDateEdit.field === 'opened') {
+                                      onUpdateIngredient(item.id, { opened: true, openedDate: val });
+                                    } else if (activeDateEdit.field === 'frozen') {
+                                      onUpdateIngredient(item.id, { frozenDate: val, location: 'freezer' });
+                                    }
+                                  }}
+                                  className="w-full bg-[#F9F7F2] border border-[#E0DBCF] rounded px-1.5 py-0.5 text-[10px] font-mono focus:outline-hidden"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setActiveDateEdit(null)}
+                                className="text-[9px] bg-[#829379] hover:bg-[#6D7D65] text-white font-bold px-2 py-0.5 rounded-md"
+                              >
+                                확인
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -451,7 +593,7 @@ export default function KanbanBoard({
                           <span>개봉함</span>
                         </label>
                         {item.category && (
-                          <span className="text-[9px] bg-[#DDE5D7] text-[#5D6D54] px-2 py-0.5 rounded-full ml-auto">
+                          <span className="text-[9px] bg-[#DDE5D7] text-[#5D6D54] px-2 py-0.5 rounded-full ml-auto font-bold">
                             {item.category}
                           </span>
                         )}
@@ -467,22 +609,6 @@ export default function KanbanBoard({
                           onChange={e => onUpdateIngredient(item.id, { memo: e.target.value })}
                           className="w-full bg-white border border-[#E0DBCF] rounded-md px-2 py-1 text-[11px] text-[#4A4A4A] focus:outline-hidden"
                         />
-                      </div>
-
-                      {/* 삭제 버튼 */}
-                      <div className="flex justify-end pt-1">
-                        <button
-                          id={`del-btn-${item.id}`}
-                          onClick={() => {
-                            if (confirm('이 재료를 삭제하시겠습니까?')) {
-                              onDeleteIngredient(item.id);
-                            }
-                          }}
-                          className="text-[#9E7676] hover:bg-[#F2E1E1] p-1 rounded-md transition-colors flex items-center gap-1 text-[10px] font-bold"
-                        >
-                          <Trash2 size={12} />
-                          <span>삭제</span>
-                        </button>
                       </div>
                     </div>
                   )}
@@ -538,6 +664,24 @@ export default function KanbanBoard({
         {/* 아코디언 상세 정보 */}
         {item.isExpanded && (
           <div className="mt-2 pt-2 border-t border-dashed border-[#E0DBCF] text-xs text-[#4A4A4A] space-y-2" onClick={e => e.stopPropagation()}>
+            {/* 삭제 버튼을 우측 상단으로 배치 */}
+            <div className="flex justify-between items-center pb-1">
+              <span className="text-[10px] text-[#4A4A4A]/60 font-bold">상세 정보</span>
+              <button
+                type="button"
+                id={`del-btn-compact-${item.id}`}
+                onClick={() => handleDeleteIngredientClick(item.id)}
+                className={`px-2 py-1 rounded-md transition-all duration-200 flex items-center gap-1 text-[9px] font-bold ${
+                  confirmDeleteId === item.id
+                    ? 'bg-red-500 text-white animate-pulse'
+                    : 'text-[#9E7676] bg-[#F2E1E1]/40 border border-[#E9C7C7]/40 hover:bg-[#F2E1E1]'
+                }`}
+              >
+                <Trash2 size={10} />
+                <span>{confirmDeleteId === item.id ? '진짜 삭제? (한번 더!)' : '삭제'}</span>
+              </button>
+            </div>
+
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <span className="text-[9px] text-[#4A4A4A]/60 block">유통기한 수정</span>
@@ -557,8 +701,7 @@ export default function KanbanBoard({
                   <button
                     type="button"
                     onClick={() => {
-                      const d = prompt('구매일을 입력하세요 (YYYY-MM-DD)', item.purchaseDate || formatDate(new Date()));
-                      if (d) onUpdateIngredient(item.id, { purchaseDate: d });
+                      setActiveDateEdit(activeDateEdit?.id === item.id && activeDateEdit?.field === 'purchase' ? null : { id: item.id, field: 'purchase' });
                     }}
                     className={`hover:text-[#829379] hover:underline whitespace-nowrap ${item.purchaseDate ? 'text-[#829379]' : ''}`}
                   >
@@ -568,8 +711,7 @@ export default function KanbanBoard({
                   <button
                     type="button"
                     onClick={() => {
-                      const d = prompt('개봉일을 입력하세요 (YYYY-MM-DD)', item.openedDate || formatDate(new Date()));
-                      if (d) onUpdateIngredient(item.id, { opened: true, openedDate: d });
+                      setActiveDateEdit(activeDateEdit?.id === item.id && activeDateEdit?.field === 'opened' ? null : { id: item.id, field: 'opened' });
                     }}
                     className={`hover:text-[#829379] hover:underline whitespace-nowrap ${item.opened && item.openedDate ? 'text-[#829379]' : ''}`}
                   >
@@ -579,18 +721,55 @@ export default function KanbanBoard({
                   <button
                     type="button"
                     onClick={() => {
-                      const d = prompt('냉동한 날짜를 입력하세요 (YYYY-MM-DD)', item.frozenDate || formatDate(new Date()));
-                      if (d) onUpdateIngredient(item.id, { frozenDate: d });
+                      setActiveDateEdit(activeDateEdit?.id === item.id && activeDateEdit?.field === 'frozen' ? null : { id: item.id, field: 'frozen' });
                     }}
                     className={`hover:text-[#829379] hover:underline whitespace-nowrap ${item.frozenDate ? 'text-[#829379]' : ''}`}
                   >
                     냉동일
                   </button>
                 </div>
+
+                {activeDateEdit && activeDateEdit.id === item.id && (
+                  <div className="mt-2 p-1.5 bg-white border border-[#E0DBCF] rounded-lg flex items-center justify-between gap-1.5 shadow-2xs">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <span className="text-[9px] font-bold text-[#5D6D54] shrink-0">
+                        {activeDateEdit.field === 'purchase' ? '구매일' : activeDateEdit.field === 'opened' ? '개봉일' : '냉동일'}
+                      </span>
+                      <input
+                        type="date"
+                        value={
+                          activeDateEdit.field === 'purchase'
+                            ? (item.purchaseDate || '')
+                            : activeDateEdit.field === 'opened'
+                            ? (item.openedDate || '')
+                            : (item.frozenDate || '')
+                        }
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (activeDateEdit.field === 'purchase') {
+                            onUpdateIngredient(item.id, { purchaseDate: val });
+                          } else if (activeDateEdit.field === 'opened') {
+                            onUpdateIngredient(item.id, { opened: true, openedDate: val });
+                          } else if (activeDateEdit.field === 'frozen') {
+                            onUpdateIngredient(item.id, { frozenDate: val, location: 'freezer' });
+                          }
+                        }}
+                        className="w-full bg-[#F9F7F2] border border-[#E0DBCF] rounded px-1.5 py-0.5 text-[10px] font-mono focus:outline-hidden"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveDateEdit(null)}
+                      className="text-[9px] bg-[#829379] hover:bg-[#6D7D65] text-white font-bold px-2 py-0.5 rounded-md"
+                    >
+                      확정
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* 메모 및 삭제/수량 */}
+            {/* 메모 및 수량 조절 */}
             <div className="flex items-center justify-between gap-2 pt-1">
               <input
                 type="text"
@@ -609,12 +788,15 @@ export default function KanbanBoard({
                       if (item.quantity > 1) {
                         onUpdateIngredient(item.id, { quantity: item.quantity - 1 });
                       } else if (item.quantity === 1) {
-                        if (confirm('수량이 0이 되어 식재료를 삭제합니다. 정말 삭제하시겠습니까?')) {
-                          onDeleteIngredient(item.id);
-                        }
+                        handleDeleteIngredientClick(item.id);
                       }
                     }}
-                    className="p-0.5 hover:bg-gray-100 rounded text-gray-500"
+                    className={`p-0.5 rounded transition-all ${
+                      confirmDeleteId === item.id && item.quantity === 1
+                        ? 'text-red-500 animate-pulse bg-red-50 font-bold scale-110'
+                        : 'hover:bg-gray-100 text-gray-500'
+                    }`}
+                    title={confirmDeleteId === item.id ? '한번 더 누르면 삭제!' : '감소'}
                   >
                     <Minus size={8} />
                   </button>
@@ -636,18 +818,6 @@ export default function KanbanBoard({
                     <option key={u} value={u}>{u}</option>
                   ))}
                 </select>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (confirm('이 재료를 삭제할까요?')) {
-                      onDeleteIngredient(item.id);
-                    }
-                  }}
-                  className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded"
-                  title="삭제"
-                >
-                  <Trash2 size={10} />
-                </button>
               </div>
             </div>
           </div>
@@ -660,12 +830,21 @@ export default function KanbanBoard({
     <div className="flex flex-col gap-6">
       {/* 1. 신규 식재료 간편 추가 영역 */}
       <div className="bg-white/40 border border-[#E0DBCF] rounded-2xl p-5 shadow-sm text-[#4A4A4A]">
-        <h3 className="font-serif font-bold text-sm md:text-base flex items-center gap-2 mb-3 text-[#5D6D54]">
-          <PackagePlus size={18} className="text-[#829379]" />
-          <span>식재료 추가</span>
-        </h3>
+        <div className="flex items-center justify-between cursor-pointer select-none" onClick={() => setIsAddFormOpen(!isAddFormOpen)}>
+          <h3 className="font-serif font-bold text-sm md:text-base flex items-center gap-2 text-[#5D6D54]">
+            <PackagePlus size={18} className="text-[#829379]" />
+            <span>식재료 추가</span>
+          </h3>
+          <button
+            type="button"
+            className="text-xs font-bold text-[#829379] hover:underline flex items-center gap-1 bg-white border border-[#E0DBCF] px-2.5 py-1 rounded-xl shadow-2xs"
+          >
+            {isAddFormOpen ? '접기 ▲' : '펼치기 ▼'}
+          </button>
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        {isAddFormOpen && (
+          <form onSubmit={handleSubmit} className="space-y-4 mt-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             {/* 1-1. 재료 이름 */}
             <div>
@@ -707,7 +886,7 @@ export default function KanbanBoard({
                 onChange={e => setNewCategory(e.target.value)}
                 className="w-full bg-white border border-[#E0DBCF] rounded-xl px-3 py-2 text-xs text-[#4A4A4A] focus:outline-hidden focus:ring-1 focus:ring-[#829379] font-medium"
               >
-                {['기타', '미분류', '곡류', '채소·버섯', '과일', '육류', '수산물', '유제품', '소스'].map(cat => (
+                {['기타', '곡류', '채소·버섯', '과일', '육류', '수산물', '유제품', '소스', '미분류'].map(cat => (
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
               </select>
@@ -781,6 +960,7 @@ export default function KanbanBoard({
             </button>
           </div>
         </form>
+        )}
       </div>
 
       {/* 2. 보기 옵션 분할 레이아웃 */}
@@ -788,7 +968,7 @@ export default function KanbanBoard({
         {/* 좌측: 분류별 카테고리 필터 */}
         <div className="w-full md:w-24 shrink-0 flex md:flex-col gap-1 overflow-x-auto md:overflow-x-visible pb-2 md:pb-0 border-b md:border-b-0 md:border-r border-[#E0DBCF]/60 pr-0 md:pr-2">
           <p className="hidden md:block text-[11px] font-bold text-gray-400 mb-2 pl-2">분류별 보기</p>
-          {['전체', '기타', '미분류', '곡류', '채소·버섯', '과일', '육류', '수산물', '유제품', '소스'].map(cat => {
+          {['전체', '기타', '곡류', '채소·버섯', '과일', '육류', '수산물', '유제품', '소스', '미분류'].map(cat => {
             const isCatSelected = selectedCategory === cat;
             return (
               <button
@@ -986,7 +1166,107 @@ export default function KanbanBoard({
                             >
                               <td className="py-3 px-4 font-bold">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-base shrink-0">{item.emoji}</span>
+                                  {/* 이모지 수동 선택 버튼 */}
+                                  <div className="relative shrink-0 select-none" onClick={e => e.stopPropagation()}>
+                                    <button
+                                      id={`emoji-btn-all-${item.id}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveEmojiPicker(activeEmojiPicker === item.id ? null : item.id);
+                                      }}
+                                      className="hover:scale-110 transition-transform text-base"
+                                      title="이모지 수동 변경"
+                                    >
+                                      {item.emoji}
+                                    </button>
+
+                                    {/* 이모지 팝오버 셀렉터 */}
+                                    {activeEmojiPicker === item.id && (
+                                      <div className="absolute top-6 left-0 z-50 bg-white border border-[#E0DBCF] rounded-xl p-2.5 shadow-xl w-52 emoji-picker-popover text-left space-y-2 font-normal">
+                                        <p className="text-[10px] text-[#5D6D54] font-bold text-center">
+                                          이모지 변경
+                                        </p>
+                                        <div className="grid grid-cols-5 gap-1">
+                                          {ALL_EMOJIS.map(em => {
+                                            const isCurrent = item.emoji === em;
+                                            return (
+                                              <button
+                                                key={em}
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  onUpdateIngredient(item.id, { emoji: em });
+                                                  setActiveEmojiPicker(null);
+                                                }}
+                                                className={`text-base p-1 rounded-lg transition-colors flex items-center justify-center ${
+                                                  isCurrent
+                                                    ? 'bg-[#DDE5D7] text-[#5D6D54] font-bold border border-[#829379]/40'
+                                                    : 'hover:bg-[#F9F7F2]'
+                                                }`}
+                                                title={isCurrent ? "현재 이모지" : ""}
+                                              >
+                                                {em}
+                                              </button>
+                                            );
+                                          })}
+                                          
+                                          {/* 커스텀 + 버튼 */}
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setCustomEmojiInputId(item.id);
+                                              setCustomEmojiText('');
+                                            }}
+                                            className="text-sm p-1 hover:bg-[#F9F7F2] rounded-lg transition-colors flex items-center justify-center font-bold text-[#829379] border border-dashed border-[#829379]/40 bg-[#829379]/5 animate-pulse"
+                                            title="직접 입력"
+                                          >
+                                            +
+                                          </button>
+                                        </div>
+
+                                        {customEmojiInputId === item.id && (
+                                          <div className="mt-2 pt-2 border-t border-dashed border-[#E0DBCF] flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                                            <input
+                                              type="text"
+                                              maxLength={2}
+                                              value={customEmojiText}
+                                              onChange={e => setCustomEmojiText(e.target.value)}
+                                              placeholder="직접 입력"
+                                              className="flex-1 bg-[#F9F7F2] border border-[#E0DBCF] rounded-lg px-2 py-1 text-[11px] focus:outline-hidden font-sans"
+                                              onKeyDown={e => {
+                                                if (e.key === 'Enter') {
+                                                  e.preventDefault();
+                                                  const val = customEmojiText.trim();
+                                                  if (val) {
+                                                    onUpdateIngredient(item.id, { emoji: val });
+                                                    setActiveEmojiPicker(null);
+                                                    setCustomEmojiInputId(null);
+                                                  }
+                                                }
+                                              }}
+                                            />
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const val = customEmojiText.trim();
+                                                if (val) {
+                                                  onUpdateIngredient(item.id, { emoji: val });
+                                                  setActiveEmojiPicker(null);
+                                                  setCustomEmojiInputId(null);
+                                                }
+                                              }}
+                                              className="bg-[#829379] hover:bg-[#6D7D65] text-white text-[10px] font-bold px-2 py-1 rounded-lg shrink-0"
+                                            >
+                                              적용
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+
                                   <span className="truncate max-w-[185px]" title={item.name}>{item.name}</span>
                                 </div>
                               </td>
@@ -1012,12 +1292,15 @@ export default function KanbanBoard({
                                             if (item.quantity > 1) {
                                               onUpdateIngredient(item.id, { quantity: item.quantity - 1 });
                                             } else if (item.quantity === 1) {
-                                              if (confirm('수량이 0이 되어 식재료를 삭제합니다. 정말 삭제하시겠습니까?')) {
-                                                onDeleteIngredient(item.id);
-                                              }
+                                              handleDeleteIngredientClick(item.id);
                                             }
                                           }}
-                                          className="p-0.5 hover:bg-gray-100 rounded text-gray-500"
+                                          className={`p-0.5 rounded transition-all ${
+                                            confirmDeleteId === item.id && item.quantity === 1
+                                              ? 'text-red-500 animate-pulse bg-red-50 font-bold scale-110'
+                                              : 'hover:bg-gray-100 text-gray-500'
+                                          }`}
+                                          title={confirmDeleteId === item.id ? '한번 더 누르면 삭제!' : '감소'}
                                         >
                                           <Minus size={8} />
                                         </button>
@@ -1060,46 +1343,172 @@ export default function KanbanBoard({
                             </tr>
                             {item.isExpanded && (
                               <tr className="bg-[#F9F7F2]/20">
-                                <td colSpan={5} className="py-3 px-6 border-b border-[#E0DBCF]/40" onClick={e => e.stopPropagation()}>
-                                  <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
-                                    <div className="flex gap-4 text-[11px] text-gray-500">
-                                      <div>
-                                        <span className="font-bold">구매일:</span>{' '}
-                                        <span className="font-mono">{item.purchaseDate || '-'}</span>
-                                      </div>
-                                      {item.opened && (
-                                        <div>
-                                          <span className="font-bold text-[#829379]">개봉일:</span>{' '}
-                                          <span className="font-mono text-[#829379]">{item.openedDate || '기록 없음'}</span>
-                                        </div>
-                                      )}
-                                      {item.frozenDate && (
-                                        <div>
-                                          <span className="font-bold text-blue-500">냉동일:</span>{' '}
-                                          <span className="font-mono text-blue-500">{item.frozenDate}</span>
-                                        </div>
-                                      )}
+                                <td colSpan={5} className="py-4 px-6 border-b border-[#E0DBCF]/40" onClick={e => e.stopPropagation()}>
+                                  <div className="max-w-2xl bg-white border border-[#E0DBCF]/80 rounded-xl p-4 shadow-2xs text-xs text-[#4A4A4A] space-y-4">
+                                    {/* 상단 헤더 영역: 상세 정보 타이틀 & 삭제 버튼 */}
+                                    <div className="flex items-center justify-between pb-2 border-b border-[#E0DBCF] border-dashed">
+                                      <span className="text-xs font-bold text-[#5D6D54]">식재료 상세 정보</span>
+                                      <button
+                                        id={`del-btn-${item.id}`}
+                                        onClick={() => handleDeleteIngredientClick(item.id)}
+                                        className={`px-2.5 py-1 rounded-lg transition-all duration-200 flex items-center gap-1.5 text-[10px] font-bold ${
+                                          confirmDeleteId === item.id
+                                            ? 'bg-red-500 text-white animate-pulse shadow-xs'
+                                            : 'text-[#9E7676] bg-[#F2E1E1]/40 border border-[#E9C7C7]/40 hover:bg-[#F2E1E1] hover:text-[#9E7676]'
+                                        }`}
+                                      >
+                                        <Trash2 size={11} />
+                                        <span>{confirmDeleteId === item.id ? '진짜 삭제? (한번 더!)' : '식재료 삭제'}</span>
+                                      </button>
                                     </div>
-                                    <div className="flex items-center gap-3 w-full md:w-auto">
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      {/* 좌측 컬럼: 유통기한 및 날짜 기록 */}
+                                      <div className="space-y-3">
+                                        <div>
+                                          <span className="text-[10px] text-[#4A4A4A]/60 block font-bold mb-1">유통기한 수정</span>
+                                          <input
+                                            type="date"
+                                            value={item.expiryDate || ''}
+                                            onChange={e =>
+                                              onUpdateIngredient(item.id, { expiryDate: e.target.value })
+                                            }
+                                            className="w-full bg-white border border-[#E0DBCF] rounded-md px-1.5 py-1 text-[11px] text-[#4A4A4A] focus:outline-hidden font-mono"
+                                          />
+                                        </div>
+
+                                        <div>
+                                          <span className="text-[10px] text-[#4A4A4A]/60 block font-bold mb-1">날짜 기록</span>
+                                          <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-gray-400 font-bold">
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setActiveDateEdit(activeDateEdit?.id === item.id && activeDateEdit?.field === 'purchase' ? null : { id: item.id, field: 'purchase' });
+                                              }}
+                                              className={`hover:text-[#829379] hover:underline whitespace-nowrap ${item.purchaseDate ? 'text-[#829379]' : ''}`}
+                                            >
+                                              구매일
+                                            </button>
+                                            <span>·</span>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setActiveDateEdit(activeDateEdit?.id === item.id && activeDateEdit?.field === 'opened' ? null : { id: item.id, field: 'opened' });
+                                              }}
+                                              className={`hover:text-[#829379] hover:underline whitespace-nowrap ${item.opened && item.openedDate ? 'text-[#829379]' : ''}`}
+                                            >
+                                              개봉일
+                                            </button>
+                                            <span>·</span>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setActiveDateEdit(activeDateEdit?.id === item.id && activeDateEdit?.field === 'frozen' ? null : { id: item.id, field: 'frozen' });
+                                              }}
+                                              className={`hover:text-[#829379] hover:underline whitespace-nowrap ${item.frozenDate ? 'text-[#829379]' : ''}`}
+                                            >
+                                              냉동일
+                                            </button>
+                                          </div>
+
+                                          {activeDateEdit && activeDateEdit.id === item.id && (
+                                            <div className="mt-2 p-1.5 bg-white border border-[#E0DBCF] rounded-lg flex items-center justify-between gap-1.5 shadow-2xs">
+                                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                                <span className="text-[9px] font-bold text-[#5D6D54] shrink-0">
+                                                  {activeDateEdit.field === 'purchase' ? '구매일' : activeDateEdit.field === 'opened' ? '개봉일' : '냉동일'}
+                                                </span>
+                                                <input
+                                                  type="date"
+                                                  value={
+                                                    activeDateEdit.field === 'purchase'
+                                                      ? (item.purchaseDate || '')
+                                                      : activeDateEdit.field === 'opened'
+                                                      ? (item.openedDate || '')
+                                                      : (item.frozenDate || '')
+                                                  }
+                                                  onChange={e => {
+                                                    const val = e.target.value;
+                                                    if (activeDateEdit.field === 'purchase') {
+                                                      onUpdateIngredient(item.id, { purchaseDate: val });
+                                                    } else if (activeDateEdit.field === 'opened') {
+                                                      onUpdateIngredient(item.id, { opened: true, openedDate: val });
+                                                    } else if (activeDateEdit.field === 'frozen') {
+                                                      onUpdateIngredient(item.id, { frozenDate: val, location: 'freezer' });
+                                                    }
+                                                  }}
+                                                  className="w-full bg-[#F9F7F2] border border-[#E0DBCF] rounded px-1.5 py-0.5 text-[10px] font-mono focus:outline-hidden"
+                                                />
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={() => setActiveDateEdit(null)}
+                                                className="text-[9px] bg-[#829379] hover:bg-[#6D7D65] text-white font-bold px-2 py-0.5 rounded-md"
+                                              >
+                                                확인
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+
+                                        {/* 기록 목록 상세 표시 */}
+                                        <div className="bg-[#F9F7F2] border border-[#E0DBCF]/60 rounded-lg p-2.5 space-y-1 text-[10px] text-[#4A4A4A]/80 font-sans">
+                                          <div className="flex justify-between">
+                                            <span>구매일:</span>
+                                            <span className="font-mono">{item.purchaseDate || '-'}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span>개봉일:</span>
+                                            <span className="font-mono">{item.opened ? (item.openedDate || '기록 없음') : '미개봉'}</span>
+                                          </div>
+                                          {item.frozenDate && (
+                                            <div className="flex justify-between text-[#829379]">
+                                              <span>냉동일:</span>
+                                              <span className="font-mono">{item.frozenDate}</span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* 우측 컬럼: 개봉 상태 & 카테고리 */}
+                                      <div className="flex flex-col space-y-3 justify-start">
+                                        <div className="space-y-2">
+                                          <span className="text-[10px] text-[#4A4A4A]/60 block font-bold">상태 및 분류</span>
+                                          <div className="bg-[#F9F7F2]/60 border border-[#E0DBCF]/50 rounded-lg p-3 flex items-center justify-between">
+                                            <label className="flex items-center gap-1.5 cursor-pointer text-[11px] font-bold text-[#4A4A4A]">
+                                              <input
+                                                type="checkbox"
+                                                checked={item.opened}
+                                                onChange={e => {
+                                                  const checked = e.target.checked;
+                                                  onUpdateIngredient(item.id, {
+                                                    opened: checked,
+                                                    openedDate: checked ? formatDate(new Date()) : undefined,
+                                                  });
+                                                }}
+                                                className="rounded-sm border-[#E0DBCF] text-[#829379] focus:ring-[#829379] h-3.5 w-3.5"
+                                              />
+                                              <span>개봉함</span>
+                                            </label>
+                                            {item.category && (
+                                              <span className="text-[9px] bg-[#DDE5D7] text-[#5D6D54] px-2 py-0.5 rounded-full font-bold">
+                                                {item.category}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* 가장 하단: 메모 기록란 (Full Width, 구분선 없음) */}
+                                    <div className="space-y-1">
+                                      <span className="text-[10px] text-[#4A4A4A]/60 block font-bold font-sans">메모 기록</span>
                                       <input
                                         type="text"
                                         value={item.memo || ''}
-                                        placeholder="특이사항 메모 입력"
+                                        placeholder="보관 시 참고할 특이사항 적기..."
                                         onChange={e => onUpdateIngredient(item.id, { memo: e.target.value })}
-                                        className="flex-1 md:w-64 bg-white border border-[#E0DBCF] rounded-lg px-2.5 py-1 text-[11px] text-[#4A4A4A] focus:outline-hidden"
+                                        className="w-full bg-white border border-[#E0DBCF] rounded-md px-3 py-1.5 text-[11px] text-[#4A4A4A] placeholder-gray-400 focus:outline-hidden focus:ring-1 focus:ring-[#829379] focus:border-[#829379] transition-all"
                                       />
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          if (confirm('이 재료를 삭제하시겠습니까?')) {
-                                            onDeleteIngredient(item.id);
-                                          }
-                                        }}
-                                        className="text-[#9E7676] hover:bg-[#F2E1E1] px-2 py-1 rounded-md transition-colors flex items-center gap-1 text-[10px] font-bold"
-                                      >
-                                        <Trash2 size={12} />
-                                        <span>삭제</span>
-                                      </button>
                                     </div>
                                   </div>
                                 </td>

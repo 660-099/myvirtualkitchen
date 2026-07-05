@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { ShoppingItem, Ingredient } from '../types';
 import { Plus, Trash2, CheckSquare, Square, ShoppingCart } from 'lucide-react';
 import CustomModal from './CustomModal';
+import { DESIGN_THEME } from '../theme';
 
 interface ShoppingAndRecipeProps {
   ingredients: Ingredient[];
@@ -84,15 +85,15 @@ export default function ShoppingAndRecipe({
   };
 
   return (
-    <div className="text-[#4A4A4A]">
+    <div className={DESIGN_THEME.colors.neutral.textMain}>
       {/* 1. 장보기 리스트 영역 */}
-      <div className="bg-white/40 border border-[#E0DBCF] rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+      <div className={`${DESIGN_THEME.containers.card} bg-white/40 flex flex-col justify-between`}>
         <div>
           <div className="flex items-center justify-between border-b border-dashed border-[#E0DBCF] pb-3 mb-4">
-            <h3 className="font-serif font-bold text-sm md:text-base flex items-center gap-1.5 text-[#5D6D54]">
-              <ShoppingCart size={16} /> 장보기 목록
+            <h3 className={`${DESIGN_THEME.fonts.sans} font-bold ${DESIGN_THEME.fontSizes.titleSmall} flex items-center gap-1.5 ${DESIGN_THEME.colors.primary.text}`}>
+              <ShoppingCart size={DESIGN_THEME.icons.sizes.md} /> 장보기 목록
             </h3>
-            <span className="text-xs bg-[#829379]/10 text-[#829379] border border-[#829379]/20 font-bold px-2.5 py-0.5 rounded-full">
+            <span className={`${DESIGN_THEME.fontSizes.meta} bg-[#829379]/10 text-[#829379] border border-[#829379]/20 font-bold px-2.5 py-0.5 rounded-full`}>
               {shoppingList.filter(item => item.completed).length}/{shoppingList.length}
             </span>
           </div>
@@ -113,7 +114,7 @@ export default function ShoppingAndRecipe({
             />
             <button
               type="submit"
-              className="bg-[#829379] hover:bg-[#6D7D65] text-white font-bold text-xs px-4 rounded-xl shadow-md transition-colors"
+              className={`${DESIGN_THEME.buttons.primary} py-2 px-4 rounded-xl`}
             >
               추가
             </button>
@@ -122,7 +123,7 @@ export default function ShoppingAndRecipe({
           {/* 장보기 항목 리스트 */}
           <div className="max-h-[280px] overflow-y-auto pr-1">
             {shoppingList.length === 0 ? (
-              <div className="text-center py-10 text-gray-400 text-xs font-sans border border-dashed border-[#E0DBCF]/80 rounded-xl bg-white/40">
+              <div className={DESIGN_THEME.containers.emptyZone}>
                 품목이 없습니다.
               </div>
             ) : (
@@ -137,7 +138,7 @@ export default function ShoppingAndRecipe({
                   <button
                     id={`toggle-shop-btn-${item.id}`}
                     onClick={() => handleToggle(item)}
-                    className="p-1 -ml-1 rounded hover:bg-[#F9F7F2] shrink-0 transition-colors"
+                    className="p-1 -ml-1 rounded hover:bg-[#F9F7F2] shrink-0 transition-colors cursor-pointer"
                     title={item.completed ? "미완료 처리" : "완료 처리"}
                   >
                     {item.completed ? (
@@ -173,10 +174,10 @@ export default function ShoppingAndRecipe({
                   <button
                     id={`del-shop-btn-${item.id}`}
                     onClick={() => onDeleteShoppingItem(item.id)}
-                    className="text-gray-400 hover:text-red-500 p-0.5 rounded-md transition-colors shrink-0"
+                    className="text-gray-400 hover:text-red-500 p-0.5 rounded-md transition-colors shrink-0 cursor-pointer"
                     title="삭제"
                   >
-                    <Trash2 size={12} />
+                    <Trash2 size={DESIGN_THEME.icons.sizes.sm} />
                   </button>
                 </div>
               ))
@@ -189,7 +190,7 @@ export default function ShoppingAndRecipe({
           <div className="mt-4 pt-3 border-t border-dashed border-[#E0DBCF] flex justify-end">
             <button
               onClick={handleClearCompletedClick}
-              className="text-[10px] font-bold text-[#9E7676] hover:bg-[#F2E1E1] px-2.5 py-1.5 rounded-lg transition-colors border border-dashed border-[#E9C7C7]"
+              className={`${DESIGN_THEME.buttons.danger} text-[10px]`}
             >
               체크한 재료 지우기
             </button>
@@ -222,19 +223,19 @@ export default function ShoppingAndRecipe({
           <div className="flex gap-2 justify-center pt-3 border-t border-dashed border-[#E0DBCF] flex-wrap sm:flex-nowrap">
             <button
               onClick={handleCancelMoveToFridge}
-              className="px-3 py-1.5 text-[11px] font-bold text-gray-500 bg-white rounded-xl hover:bg-[#E0DBCF]/40 transition-colors border border-[#E0DBCF]"
+              className={`${DESIGN_THEME.buttons.secondary} py-1.5 text-[11px]`}
             >
               취소
             </button>
             <button
               onClick={handleOnlyDelete}
-              className="px-3 py-1.5 text-[11px] font-bold text-[#9E7676] bg-[#F2E1E1]/50 border border-[#E9C7C7]/50 rounded-xl hover:bg-[#F2E1E1] transition-colors"
+              className={`${DESIGN_THEME.buttons.danger} py-1.5 text-[11px]`}
             >
               냉장고 추가 없이 지우기
             </button>
             <button
               onClick={handleConfirmMoveToFridge}
-              className="px-4 py-1.5 text-[11px] font-bold text-white bg-[#829379] rounded-xl hover:bg-[#6D7D65] shadow-md transition-colors"
+              className={`${DESIGN_THEME.buttons.primary} py-1.5 px-4 text-[11px] rounded-xl`}
             >
               네, 냉장고에 추가!
             </button>
